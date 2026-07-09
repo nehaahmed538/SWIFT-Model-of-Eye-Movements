@@ -1,0 +1,23 @@
+# SWIFT BayesFlow Project — Requirements
+# Install: pip install -r requirements.txt
+
+# BayesFlow v2 (amortized inference)
+bayesflow==2.0.11
+
+# Keras backend — choose ONE:
+#tensorflow==2.18.0
+#tensorflow==2.15.1      # recommended for most setups
+torch>=2.0          # alternative PyTorch backend
+# jax[cpu]>=0.4       # alternative JAX backend
+
+# Scientific stack
+numpy>=2.2.6
+#numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+matplotlib>=3.7
+seaborn>=0.12
+
+# Utilities
+tqdm>=4.65
+jupyter>=1.0          # for notebooks (optional)
