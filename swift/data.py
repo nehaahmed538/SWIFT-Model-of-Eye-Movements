@@ -189,6 +189,20 @@ def refix_rate(fix: pd.DataFrame) -> float:
     return refix / total if total > 0 else 0.0
 
 
+def saccade_amplitude(fix: pd.DataFrame) -> np.ndarray:
+    """Per-saccade amplitude (|words moved|, signed distance dropped) between
+    consecutive fixations within each sentence, pooled across all sentences.
+    The classic movement-pattern statistic alongside duration/skip/refixation
+    (short forward saccades dominate; occasional skips and regressions widen
+    the distribution)."""
+    amps = []
+    for _, g in fix.groupby("sentence_id"):
+        words = g.sort_values("fixation_index")["word_id"].values
+        if len(words) > 1:
+            amps.extend(np.abs(np.diff(words)).tolist())
+    return np.array(amps, dtype=float)
+
+
 def synthetic_corpus(n_sentences: int = 114) -> pd.DataFrame:
     """Synthetic corpus fallback for testing without the real corpus file."""
     rng = np.random.default_rng(42)
