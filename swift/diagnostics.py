@@ -115,16 +115,18 @@ def plot_posterior(posterior_samples: np.ndarray, true_params: dict = None,
 # ---------------------------------------------------------------------------
 
 def _seq_stats(fixations):
-    """(durations, landings, count, skip_rate, refix_rate) for one sentence."""
+    """(durations, landings, count, skip_rate, refix_rate, saccade_amps) for
+    one sentence."""
     if len(fixations) == 0:
-        return [], [], 0, np.nan, np.nan
+        return [], [], 0, np.nan, np.nan, []
     arr = np.array(fixations)
     w = arr[:, 0].astype(int)
     mx = w.max()
     skip = sum(1 for k in range(1, mx + 1) if k not in set(w)) / mx
     refix = (sum(1 for i in range(len(w) - 1) if w[i] == w[i + 1])
              / max(len(w) - 1, 1))
-    return arr[:, 2].tolist(), arr[:, 1].tolist(), len(w), skip, refix
+    amps = np.abs(np.diff(w)).tolist() if len(w) > 1 else []
+    return arr[:, 2].tolist(), arr[:, 1].tolist(), len(w), skip, refix, amps
 
 
 def posterior_predictive_check(posterior_samples, real_fix_df,
@@ -137,7 +139,7 @@ def posterior_predictive_check(posterior_samples, real_fix_df,
     save_dir.mkdir(parents=True, exist_ok=True)
     n_sent = len(word_lengths_list)
 
-    sim_dur, sim_lnd, sim_fps, sim_skip, sim_refix = [], [], [], [], []
+    sim_dur, sim_lnd, sim_fps, sim_skip, sim_refix, sim_amp = [], [], [], [], [], []
     idx = rng.choice(len(posterior_samples), size=min(n_ppc, len(posterior_samples)),
                      replace=False)
     print(f"Running PPC with {len(idx)} posterior draws x {M_SENTENCES} sentences...")
@@ -145,33 +147,35 @@ def posterior_predictive_check(posterior_samples, real_fix_df,
         params = dict(zip(PARAM_NAMES, theta.tolist()))
         sim = SWIFTSimulator(params)
         for si in rng.integers(0, n_sent, size=M_SENTENCES):
-            d, l, c, sk, rf = _seq_stats(
+            d, l, c, sk, rf, am = _seq_stats(
                 sim.simulate_sentence(word_lengths_list[si], word_freqs_list[si], rng=rng))
             if c > 0:
                 sim_dur += d; sim_lnd += l; sim_fps.append(c)
-                sim_skip.append(sk); sim_refix.append(rf)
+                sim_skip.append(sk); sim_refix.append(rf); sim_amp += am
 
     real_dur = real_fix_df["fixation_duration"].values
     real_lnd = real_fix_df["landing_position"].values
     real_fps = real_fix_df.groupby("sentence_id").size().values
-    from swift.data import skip_rate, refix_rate
+    from swift.data import refix_rate, saccade_amplitude, skip_rate
     real_skip, real_refix = skip_rate(real_fix_df), refix_rate(real_fix_df)
+    real_amp = saccade_amplitude(real_fix_df)
 
-    fig, axes = plt.subplots(1, 4, figsize=(19, 4.5))
+    fig, axes = plt.subplots(1, 5, figsize=(23, 4.5))
     fig.suptitle("Posterior Predictive Check   "
                  "Blue = Real VP10   |   Orange = Simulated from posterior",
                  fontsize=12)
     _panel(axes[0], real_dur, sim_dur, "Fixation Duration (ms)", 40)
     _panel(axes[1], real_lnd, sim_lnd, "Landing Position (chars)", 30)
     _panel(axes[2], real_fps, sim_fps, "Fixations per Sentence", 15)
+    _panel(axes[3], real_amp, sim_amp, "Saccade Amplitude (words)", 20)
 
-    axes[3].bar([0, 1], [real_skip * 100, real_refix * 100], width=0.35,
+    axes[4].bar([0, 1], [real_skip * 100, real_refix * 100], width=0.35,
                 color="steelblue", label="Real")
-    axes[3].bar([0.4, 1.4], [np.nanmean(sim_skip) * 100, np.nanmean(sim_refix) * 100],
+    axes[4].bar([0.4, 1.4], [np.nanmean(sim_skip) * 100, np.nanmean(sim_refix) * 100],
                 width=0.35, color="darkorange", label="Simulated")
-    axes[3].set_xticks([0.2, 1.2]); axes[3].set_xticklabels(["Skip", "Refixation"])
-    axes[3].set_ylabel("Rate (%)"); axes[3].set_title("Skip / Refixation Rate")
-    axes[3].legend(fontsize=9)
+    axes[4].set_xticks([0.2, 1.2]); axes[4].set_xticklabels(["Skip", "Refixation"])
+    axes[4].set_ylabel("Rate (%)"); axes[4].set_title("Skip / Refixation Rate")
+    axes[4].legend(fontsize=9)
 
     plt.tight_layout()
     out = save_dir / "ppc_plot.png"
@@ -186,6 +190,7 @@ def posterior_predictive_check(posterior_samples, real_fix_df,
         ("Std  duration (ms)", np.std(real_dur), np.std(sim_dur)),
         ("Mean fixations/sent", np.mean(real_fps), np.mean(sim_fps)),
         ("Mean landing pos", np.mean(real_lnd), np.mean(sim_lnd)),
+        ("Mean saccade amp (words)", np.mean(real_amp), np.nanmean(sim_amp)),
         ("Skip rate (%)", real_skip * 100, np.nanmean(sim_skip) * 100),
         ("Refixation rate (%)", real_refix * 100, np.nanmean(sim_refix) * 100),
     ]:
