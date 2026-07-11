@@ -1,0 +1,108 @@
+{
+  "generated_at": "2026-07-11 18:40:58",
+  "model_path": "outputs/models/swift_approximator.keras",
+  "config": {
+    "M_SENTENCES": 14,
+    "SEQ_LEN": 150,
+    "N_STATS": 7
+  },
+  "vp10_data": {
+    "n_fixations": 877,
+    "n_sentences": 114,
+    "duration_mean_ms": 196.9407069555302,
+    "duration_std_ms": 48.43504001573786,
+    "fixations_per_sentence": 7.692982456140351,
+    "skip_rate": 0.19556451612903225,
+    "refix_rate": 0.10222804718217562
+  },
+  "recovery": [
+    {
+      "parameter": "t_sac",
+      "recovery_r": 0.9896019919847224,
+      "contraction": 0.9781736774946511,
+      "ci95_coverage": 0.9666666666666667
+    },
+    {
+      "parameter": "eta",
+      "recovery_r": 0.8779312503323025,
+      "contraction": 0.7446047888649174,
+      "ci95_coverage": 0.9466666666666667
+    },
+    {
+      "parameter": "delta0",
+      "recovery_r": 0.513641095784604,
+      "contraction": 0.3140415481544915,
+      "ci95_coverage": 0.9266666666666666
+    },
+    {
+      "parameter": "R",
+      "recovery_r": 0.42130016029344075,
+      "contraction": 0.11350971031390722,
+      "ci95_coverage": 0.96
+    }
+  ],
+  "vp10_posterior": [
+    {
+      "parameter": "t_sac",
+      "mean": 256.0571317062527,
+      "ci95_low": 232.4052432179451,
+      "ci95_high": 281.8042656779289
+    },
+    {
+      "parameter": "eta",
+      "mean": 0.6181363926185833,
+      "ci95_low": 0.3171095999930407,
+      "ci95_high": 0.915179789525143
+    },
+    {
+      "parameter": "delta0",
+      "mean": 8.31681304048188,
+      "ci95_low": 4.183354114741087,
+      "ci95_high": 14.166590324044227
+    },
+    {
+      "parameter": "R",
+      "mean": 0.37808631894696004,
+      "ci95_low": 0.10873335577646763,
+      "ci95_high": 0.8492561218585868
+    }
+  ],
+  "ppc": [
+    {
+      "statistic": "Mean duration (ms)",
+      "real": 196.94,
+      "simulated": 197.2
+    },
+    {
+      "statistic": "Std  duration (ms)",
+      "real": 48.41,
+      "simulated": 54.47
+    },
+    {
+      "statistic": "Mean fixations/sent",
+      "real": 7.69,
+      "simulated": 7.61
+    },
+    {
+      "statistic": "Mean landing pos",
+      "real": 3.4,
+      "simulated": 2.85
+    },
+    {
+      "statistic": "Mean saccade amp (words)",
+      "real": 1.12,
+      "simulated": 1.35
+    },
+    {
+      "statistic": "Skip rate (%)",
+      "real": 19.56,
+      "simulated": 23.31
+    },
+    {
+      "statistic": "Refixation rate (%)",
+      "real": 10.22,
+      "simulated": 9.56
+    }
+  ],
+  "runtime_seconds": 34.7
+}

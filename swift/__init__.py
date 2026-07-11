@@ -1,0 +1,1 @@
+"""SWIFT amortised-inference package."""
