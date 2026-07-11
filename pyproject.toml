@@ -1,0 +1,22 @@
+[project]
+name = "swift-bayesflow"
+version = "0.2.0"
+description = "Amortized Bayesian inference for the SWIFT model of eye movements (BayesFlow v2)"
+requires-python = ">=3.10"
+dependencies = [
+    "bayesflow==2.0.11",
+    "keras>=3.5",
+    "torch>=2.0",
+    "numpy>=2.0",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+]
+
+[tool.setuptools]
+packages = ["swift"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
