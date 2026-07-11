@@ -15,3 +15,6 @@ outputs/models/
 
 # OS / editor
 .DS_Store
+
+# Claude Code project config/context (local only, not shared via git)
+.claude/
