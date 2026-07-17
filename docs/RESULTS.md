@@ -1,61 +1,65 @@
-# Results — SWIFT + BayesFlow amortized inference
+# Results — simplified SWIFT + BayesFlow amortized inference
 
-This is the full write-up of what the trained model achieves. For "what is
-this project and how does it work," see
-**[PROJECT_GUIDE.md](PROJECT_GUIDE.md)**. Every number on this page was
-produced by actually loading the currently saved model
-(`outputs/models/swift_approximator.keras`) and running it — reproduce it
-yourself anytime with:
+Full write-up of what the trained model achieves. For "what is this project
+and how does it work," see **[PROJECT_GUIDE.md](PROJECT_GUIDE.md)**; for the
+equation-by-equation simulator spec, **[MODEL_SPEC.md](MODEL_SPEC.md)**. Every
+number on this page was produced by loading the currently saved model
+(`outputs/models/swift_approximator.keras`) and running it — reproduce anytime
+with:
 
 ```bash
 python tools/show_results.py
 ```
 
-(~30 seconds, read-only, does not retrain anything). Figures referenced below
-are all in [`outputs/figures/`](../outputs/figures/). Because VP10 inference
-pools posteriors over *randomly drawn* 14-sentence subsets and the PPC
-re-simulates from *randomly drawn* posterior samples, exact figures move by
-a small amount (a point or two) between runs — the numbers below are one
-representative run (`--seed 0`, the default), and every table also states
-the scale of that run-to-run noise where it matters.
+(~20 seconds, read-only, no retraining). Figures are in
+[`outputs/figures/`](../outputs/figures/). VP10 inference pools posteriors over
+*randomly drawn* 14-sentence subsets and the PPC re-simulates from *randomly
+drawn* posterior samples, so exact figures move by a point or two between runs;
+the numbers below are one representative run (default seed).
+
+> **2026-07-17 model.** This is the **basic 3-parameter** simplified SWIFT
+> model of Engbert & Rabe (2024) — `nu`, `r`, `mu_T`, with the paper's own
+> labels. It replaced an earlier simulator that implemented the *full* SWIFT
+> (Gillespie algorithm, activation thresholds, landing positions) under
+> reparametrised non-paper names (`t_sac`, `eta`, `delta0`, `R`), which the
+> lecturer flagged. If you find those old names anywhere outside git history,
+> they are stale.
 
 ---
 
 ## TL;DR
 
-The final model — **M_SENTENCES=14, LSTM summary network + hand-crafted
-statistic conditions** — recovers `t_sac` and `eta` strongly (r = 0.99 /
-0.88) and `delta0`/`R` moderately (r = 0.52 / 0.43), all four inside their
-95% SBC coverage bands, and its posterior-predictive simulations closely
-match VP10's real fixation duration, count, and skip/refixation rates. The
-moderate `delta0`/`R` recovery is an honest identifiability limit of a
-single participant's fixation record, not a bug — and it's exactly what the
-project should report as a finding, not hide.
+The final model — **M_SENTENCES=14, TimeSeriesNetwork summary + 7 hand-crafted
+statistic conditions**, trained on 8000 simulated readers — recovers all three
+parameters **strongly** (recovery r = 0.94 / 0.96 / 1.00 for `nu` / `r` /
+`mu_T`), all within their 95% SBC coverage bands. On VP10 it infers
+`mu_T ≈ 198 ms` (E[fixation duration] = `mu_T` exactly), `r ≈ 6.3`,
+`nu ≈ 0.40`. The temporal ⊥ spatial decoupling the paper predicts holds
+(posterior corr `mu_T` vs `nu`,`r` ≈ 0). Posterior-predictive simulations match
+VP10's fixation durations (SFD/GD/TT all within ~6 ms) and skip/refixation
+rates closely; the model **over-produces regressions** (10% vs VP10's 2%) and
+**over-predicts duration spread** (structural CV = 1/3 vs VP10's 0.246). Both
+are honest limitations of the simplified model, not bugs — and are what the
+write-up should report.
 
 ---
 
-## 1. The story: three iterations
+## 1. The model in one paragraph
 
-| # | Version | Duration match | Recoverable parameters |
-|---|---|---|---|
-| 1 | **Original simulator** | Badly broken: ~350 ms mean duration, 12+ fixations/sentence (real: ~197 ms, ~7.7 fixations/sentence) | Only `t_sac` |
-| 2 | **Recalibrated + multi-sentence** (`tools/calibrate.py` tuning, `M_SENTENCES` concatenation) | Simulator matches VP10's marginals | `t_sac`/`eta` good; `delta0`/`R` weak (≈0.32 / 0.26) — the LSTM summary alone couldn't reliably extract skip/refixation signal from the raw sequence |
-| 3 | **+ hand-crafted statistic conditions** (current, final) | Matches VP10 closely (§4) | `t_sac`/`eta` strong (0.99/0.88); `delta0`/`R` roughly **doubled** to moderate (0.52/0.43) |
-
-Two things were tried and explicitly **did not help** (recorded here so they
-aren't re-tried): distorting the fixed simulator constants to artificially
-inflate the `delta0`/`R` signal (broke the PPC match instead), and a
-bidirectional LSTM summary network (2× slower to train, no recovery gain
-over the unidirectional one currently used).
-
-Before/after diagnostic plots for iteration 2 vs. 3 are in
-[`outputs/figures/baseline_M10/`](../outputs/figures/baseline_M10/) (older,
-M=10, LSTM-only) vs. [`outputs/figures/`](../outputs/figures/) (current,
-M=14, +statistics).
+Words sit at discrete positions `1..N` (no spatial extent, no word length, no
+Gillespie algorithm). On each fixation, an asymmetric 4-word processing span
+`{k-1, k, k+1, k+2}` accrues activation at rate `r`; a sine-shaped saliency
+rule (peaking at half-processed) picks the next target. Skipping, refixation
+and regression are all **emergent** from that one rule — there is no explicit
+mechanism for any of them, and adding one would double-count. Fixation
+durations are independent Gamma draws (`shape α=9`, `mean μ_T`), giving a
+fixed CV = 1/3 by construction. Three free parameters: `nu` (span shape), `r`
+(processing rate), `mu_T` (mean duration). See
+[MODEL_SPEC.md](MODEL_SPEC.md).
 
 ---
 
-## 2. Real VP10 data (the benchmark everything else is checked against)
+## 2. Real VP10 data (the benchmark)
 
 From `data/fixseqin_PB2expVP10.dat`:
 
@@ -64,9 +68,11 @@ From `data/fixseqin_PB2expVP10.dat`:
 | Total fixations | 877 |
 | Sentences | 114 |
 | Mean fixation duration | 196.9 ± 48.4 ms |
+| Duration CV | **0.246** |
 | Mean fixations / sentence | 7.69 |
 | Skip rate | 19.6% |
 | Refixation rate | 10.2% |
+| Regression rate | 2.04% |
 
 (`outputs/figures/eda_fixations.png` — distributions behind these means.)
 
@@ -80,155 +86,160 @@ each (`outputs/figures/recovery_plot.png`, `sbc_histogram.png`,
 
 | Parameter | Recovery r | Posterior contraction | 95% CI coverage (nominal 95%) | Identifiability |
 |---|---:|---:|---:|---|
-| `t_sac` | **0.990** | 0.978 | 96.3% | strong |
-| `eta` | **0.878** | 0.744 | 94.3% | strong |
-| `delta0` | **0.516** | 0.313 | 93.0% | moderate |
-| `R` | **0.428** | 0.112 | 95.0% | moderate |
+| `nu`   | **0.941** | 0.866 | 95.0% | strong |
+| `r`    | **0.959** | 0.904 | 96.0% | strong |
+| `mu_T` | **0.997** | 0.990 | 95.3% | strong |
 
 How to read this:
-- **Recovery r** — Pearson correlation between the posterior mean and the
-  true θ across the 300 validation simulations. `t_sac`/`eta` sit on the
-  diagonal in `recovery_plot.png`; `delta0`/`R` show a real but noisier
-  trend.
-- **Contraction** — `1 − posterior_variance / prior_variance`. `t_sac`'s
-  0.978 means its posterior is ~98% narrower than the prior (highly
-  informative); `R`'s 0.112 means its posterior is barely narrower than the
-  flat prior — the data constrains it only a little.
-- **95% CI coverage** — of the 300 validation draws, the fraction where the
-  true value actually fell inside the posterior's own 95% interval. All four
-  land close to the nominal 95%, which is the point of the SBC check
-  (`sbc_histogram.png`/`sbc_ecdf.png`): the network's *uncertainty estimates*
-  are honest even where the *point estimates* (for `delta0`/`R`) are only
-  moderately accurate. That combination — moderate accuracy, honest
-  uncertainty — is a calibrated model correctly reporting "I'm not fully
-  sure," not a failure.
+- **Recovery r** — Pearson correlation between posterior mean and true θ over
+  the 300 validation simulations. `mu_T` sits almost exactly on the diagonal
+  (it is the mean of a Gamma with known shape, so it is read directly off the
+  durations); `nu` and `r` are noisier but clearly identified.
+- **Contraction** — `1 − posterior_var / prior_var`. `mu_T`'s 0.990 means its
+  posterior is ~99% narrower than the prior; even `nu`'s 0.866 is strong.
+- **95% CI coverage** — fraction of the 300 draws where the true value fell
+  inside the posterior's own 95% interval. All three land at ~95%, confirming
+  (via SBC, `sbc_*.png`) that the network's uncertainty estimates are honest.
+
+Note vs. the paper's Fig. 7: the paper reports `nu` as its *hardest* parameter
+with a right-skewed posterior. Adding the 7 hand-crafted reading-measure
+statistics as direct network conditions (skip/refix/regression rates etc.)
+lifts `nu` here to strong recovery — the summary LSTM alone does not reliably
+extract that scanpath signal from the raw sequence.
 
 ---
 
 ## 4. VP10 posterior estimates
 
-Pooled over 40 random 14-sentence draws of VP10's own data, 2000 posterior
-samples per draw (`outputs/figures/posterior_VP10.png`):
+Pooled over 40 random 14-sentence draws of VP10's own data (train split),
+2000 posterior samples per draw (`outputs/figures/posterior_VP10.png`):
 
 | Parameter | Mean | 95% CI | Prior range |
 |---|---:|---|---|
-| `t_sac` | 256.1 ms | [232.6, 281.9] ms | [150, 350] ms |
-| `eta` | 0.62 | [0.32, 0.92] | [0.1, 1.0] |
-| `delta0` | 8.3 chars | [4.2, 14.2] chars | [4, 15] chars |
-| `R` | 0.38 | [0.11, 0.85] | [0.1, 0.9] |
+| `nu`   | 0.40   | [0.28, 0.54]        | [0.0, 1.0] |
+| `r`    | 6.33   | [5.27, 7.87]        | [0.0, 12.0] |
+| `mu_T` | 198.0 ms | [182.0, 216.1] ms | [100, 400] ms |
 
-None of the four posteriors are pegged against a prior boundary, and
-`t_sac`/`eta` (the strongly-identified pair, per §3) are visibly narrower
-relative to their prior range than `delta0`/`R` are — consistent with the
-recovery/contraction numbers above, and visible directly in
-`posterior_VP10.png`.
+`mu_T ≈ 198 ms` matches VP10's mean fixation duration of 196.9 ms almost
+exactly — expected, because in this model **E[fixation duration] = mu_T** by
+construction. None of the posteriors are pegged against a prior boundary.
+
+### Decoupling check (paper Section 4.1)
+
+The basic model decouples timing (`mu_T`) from scanpath (`nu`, `r`). The VP10
+posterior correlation matrix confirms it (`outputs/figures/posterior_correlation.png`):
+
+```
+              nu       r    mu_T
+nu         1.000  -0.317   0.007
+r         -0.317   1.000   0.061
+mu_T       0.007   0.061   1.000
+```
+
+`mu_T` vs (`nu`, `r`) ≈ 0.007 / 0.061 ≈ 0 — durations carry no information
+about the scanpath and vice versa, exactly as the paper predicts. (`nu` and
+`r` trade off with each other, −0.317, since both shape processing.)
 
 ---
 
 ## 5. Posterior predictive check (PPC)
 
-Simulate new data from 300 draws of the VP10 posterior above, compare
-summary statistics against VP10's real data (never raw sequences — see
-[PROJECT_GUIDE.md §7.7](PROJECT_GUIDE.md#77-posterior-predictive-check-ppc)
-for why). Plot: `outputs/figures/ppc_plot.png`.
+Simulate new data from 300 draws of the VP10 posterior above, compare reading
+measures against VP10's real data — on the **held-out second half of sentences**
+(paper Section 6: train on first-half sentences, PPC on second-half). Never
+raw sequences. Plot: `outputs/figures/ppc_plot.png`.
 
 ```
 ===== PPC SUMMARY =====
 Statistic                       Real   Simulated
 ------------------------------------------------
-Mean duration (ms)            196.94      196.49
-Std  duration (ms)             48.41       54.50
-Mean fixations/sent             7.69        7.51
-Mean landing pos                3.40        2.86
-Mean saccade amp (words)        1.12        1.37
-Skip rate (%)                  19.56       23.59
-Refixation rate (%)            10.22        8.86
+Mean SFD (ms)                 202.52      204.38
+Mean GD  (ms)                 213.64      212.34
+Mean TT  (ms)                 214.38      220.19
+P(skip) (%)                    20.55       18.06
+P(refixation) (%)               9.09        7.71
+P(regression) (%)               1.82       10.11
 ```
 
-Duration, fixation count, and saccade amplitude (how many words the eye jumps
-per saccade — the classic "movement pattern" statistic, mostly short forward
-steps for both real and simulated data) all match closely. Skip rate and
-refixation rate are in the right neighbourhood but not exact (simulated skip
-rate runs a few points high, refixation a couple points low) — consistent
-with §3's finding that `delta0` (which drives skipping) and `R` (which drives
-refixation) are only moderately identified, so the posterior used to generate
-these simulations carries more residual uncertainty on exactly those two
-statistics.
+SFD (single-fixation duration), GD (gaze duration) and TT (total time) all
+match within ~6 ms. Skip and refixation rates are within a couple of points.
+The one clear miss is **P(regression): 10.1% simulated vs 1.82% real** — see
+§6.
 
-Run-to-run variation at `n_ppc=300`: repeated runs put simulated duration
-within about ±1 ms, fixations/sentence within ±0.1, and skip/refixation rate
-within 1–2 percentage points of the values above — small relative to the
-real-vs-simulated gaps themselves.
+Run-to-run variation at `n_ppc=300`: durations within ~±2 ms, probabilities
+within 1–2 percentage points — small relative to the regression gap itself.
 
 ---
 
-## 6. Honest limitations (for the report)
+## 6. Deviations from Engbert & Rabe (2024)
 
-- **`delta0`/`R` are moderately, not strongly, identifiable from one
-  participant's fixation record.** This is a genuine finding, backed by
-  both the recovery numbers and the (near-zero, for `R`) posterior
-  contraction — not an artifact of insufficient training. The recommended
-  framing for the write-up: *"t_sac and eta are strongly identified; delta0
-  and R only moderately — a genuine identifiability limit of single-
-  participant fixation data, confirmed by SBC and posterior contraction, and
-  substantially improved (roughly doubled) by adding domain summary
-  statistics as direct network conditions."*
-- **The fixed constants (§4.2 of the project guide) are calibrated, not
-  fit.** `tools/calibrate.py` checks that the simulator's *prior-averaged*
-  marginals resemble VP10, by hand-tuning `alpha, beta, h, gamma, kappa,
-  rho, sigma, omega`. This is not a formal Bayesian fit and has no posterior
-  or uncertainty attached to it — worth one sentence in the report's
-  methods/limitations section.
-- **Remaining lever, if there's time**: raising `M_SENTENCES` (currently 14)
-  in `swift/config.py` gives the network more evidence per simulated reader,
-  at the cost of a longer `generate` + `train` run. This is the only change
-  that improved `delta0`/`R` recovery during development; changing the fixed
-  constants or switching to a bidirectional LSTM did not (§1).
+Honest list for the report — where this implementation departs from the paper,
+and why.
+
+- **Time unit: activation uses seconds, not milliseconds.** The paper states
+  durations in ms throughout, but its `r` values (5–10) only produce sensible
+  multi-fixation processing if `r·λ·T` uses `T` in **seconds**. With `T` in ms,
+  `r·λ·T` reaches the hundreds and every in-span word saturates in a single
+  fixation, which collapses the sine-saliency rule and makes the scanpath
+  independent of `nu` and `r` (verified: skip/refix/regression rates went flat
+  across all parameter values). Converting `T` to seconds in the activation
+  update restores parameter-dependent behaviour matching the paper's Sections
+  2.4/3. This is the single interpretive choice needed to reconcile the paper's
+  ms wording with its `r` values. See [MODEL_SPEC.md](MODEL_SPEC.md) "Unit note".
+- **`beta = 0.6` fixed, not free.** The word-frequency effect on maximum
+  activation is fixed at the paper's Section-5 recovery value. `beta = 0` (no
+  frequency effect, strict Section-3 baseline) is the documented alternative;
+  freeing `beta` belongs to the 5-parameter extended model.
+- **Duration spread is structurally over-predicted.** The Gamma timer fixes
+  CV = 1/√α = 1/3 = 0.333 by construction, but VP10's real duration CV is
+  **0.246** — the model's durations are ~35% too dispersed. This is a genuine
+  limitation of the basic model (the shape `α` is not free), worth reporting as
+  a finding rather than tuning away.
+- **Regressions over-produced (10% vs 2%).** Regressions are emergent from the
+  saliency rule with no suppression mechanism, so the model regresses more than
+  VP10 does. The paper's basic model has the same structure; an explicit
+  regression/inhibition term (not added here — it would double-count against
+  the emergent rule) is the natural extension.
+- **`iota` not implemented.** The timer-coupling term (extended model, Eq. 22,
+  `rate' = rate·(1 + iota·a_k)`) is omitted — the basic model keeps durations
+  fully independent of processing. Noted as future work.
 
 ---
 
 ## 7. Assignment requirements checklist
 
-Checked against the official brief (Simon Kucharsky, TU Dortmund — SBI
-Final Projects):
+Checked against the official brief (Simon Kucharsky, TU Dortmund):
 
 | Requirement | Status | Where |
 |---|---|---|
-| Implement the **simplified** SWIFT model (Engbert & Rabe, 2024) — not the full, computationally intensive version | ✅ | `swift/simulator.py`; labile/non-labile programming stages collapsed into one saccade timer, as the paper's simplification does |
-| Model has timing/control for **fixation duration** | ✅ | Saccade timer (`t_sac`, `h`) — §4.1 |
-| Model has timing/control for **saccades** (where the eye goes next) | ✅ | `_select_target()` — §4.1 |
+| Implement the **simplified** SWIFT model (Engbert & Rabe, 2024) — not the full version | ✅ | `swift/simulator.py`; basic 3-parameter model, discrete positions, no Gillespie |
+| Model has control for **fixation duration** | ✅ | Gamma saccade timer (`mu_T`, `alpha`) — MODEL_SPEC Eq. 10–12 |
+| Model has control for **saccades** (where the eye goes next) | ✅ | Sine-saliency target rule — MODEL_SPEC Eq. 8–9 |
 | Implement it **in BayesFlow** | ✅ | `swift/inference.py`, BayesFlow v2.0.11 |
-| Estimate parameters related to **gaze control and reading dynamics** | ✅ | `t_sac`, `eta`, `delta0`, `R` — §3 |
-| Real eye-tracking data, controlled reading experiment (osf.io/teyd4) | ✅ | `data/fixseqin_PB2expVP10.dat`, participant VP10, 877 fixations / 114 sentences |
-| Corpus linking fixations to word properties (osf.io/nj2mf) | ✅ | `data/Rcorpus_PB2_revision.dat`, joined on `sentence_id`/`word_id`, supplies length + frequency |
-| Investigate fit to **fixation durations** | ✅ | PPC §5 — mean/std duration |
-| Investigate fit to **movement patterns** | ✅ | PPC §5 — landing position, fixations/sentence, **saccade amplitude**, skip rate, refixation rate |
+| Estimate parameters related to **gaze control and reading dynamics** | ✅ | `nu`, `r`, `mu_T` — §3 |
+| Real eye-tracking data, controlled reading experiment (osf.io/teyd4) | ✅ | `data/fixseqin_PB2expVP10.dat`, VP10, 877 fixations / 114 sentences |
+| Corpus linking fixations to word properties (osf.io/nj2mf) | ✅ | `data/Rcorpus_PB2_revision.dat`, supplies word frequency (drives `a_max`) |
+| Investigate fit to **fixation durations** | ✅ | PPC §5 — SFD / GD / TT |
+| Investigate fit to **movement patterns** | ✅ | PPC §5 — P(skip), P(refixation), P(regression) |
+| Train / test split (paper Section 6) | ✅ | first-half sentences train, second-half PPC (`swift/data.split_half`) |
 
-**Open item, flagged rather than silently resolved** (per this repo's own
-convention of not guessing at column semantics): the corpus file has a
-`code` column (`swift/data.py::load_corpus` reads it but nothing downstream
-uses it) with exactly 4 distinct values — `9` on 661/1003 words (the
-majority) and `0`, `1`, `2` each on exactly 114/1003 words, i.e. exactly one
-word per sentence carries each of those three codes. Given the file names
-(`PB2`, "boundary paradigm") and the companion Rabe et al. (2021) reference
-already in this repo, the most likely explanation is that this marks
-word positions relevant to the original *display-change/boundary-paradigm*
-manipulation (e.g. pretarget/target/posttarget), which the continuous-
-reading simplified SWIFT model implemented here does not simulate — so it
-should be safe to leave unused. This has **not** been confirmed against the
-original OSF page or the Rabe et al. (2021) methods section (the OSF pages
-are JS-rendered and didn't yield content via automated fetch), so treat this
-as a documented assumption, not a verified fact — worth a two-minute check
-against the paper if it comes up in Q&A.
+**Open item** (per this repo's convention of flagging rather than guessing):
+the corpus `code` column is read but unused downstream — 4 distinct values
+(`9` on 661/1003 words; `0`/`1`/`2` each on exactly 114/1003, one word per
+sentence per code), most likely pretarget/target/posttarget markers from the
+original boundary-paradigm display-change manipulation, which this continuous-
+reading model does not simulate. Not confirmed against the source paper (OSF
+pages are JS-rendered and returned no content to automated fetches). Documented
+assumption, not a verified fact.
 
 ---
 
 ## 8. References
 
-- Engbert, R., & Rabe, M. B. (2024). *A tutorial on Bayesian inference for
+- Engbert, R., & Rabe, M. M. (2024). *A tutorial on Bayesian inference for
   dynamical modeling of eye-movement control during reading.* Journal of
   Mathematical Psychology, 119, 102843.
-- Rabe, M. B., et al. (2021). *A Bayesian approach to dynamical modeling of
+- Rabe, M. M., et al. (2021). *A Bayesian approach to dynamical modeling of
   eye-movement control in reading of normal, mirrored, and scrambled texts.*
   Psychological Review, 128(3), 516–543.
 - Talts, S., Betancourt, M., Simpson, D., Vehtari, A., & Gelman, A. (2018).

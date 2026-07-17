@@ -134,9 +134,11 @@ def main() -> None:
 
     from swift.data import (
         build_corpus_lists, build_reader_batch, load_corpus, load_fixations,
-        refix_rate, skip_rate,
+        refix_rate, regression_rate, skip_rate, split_half,
     )
-    from swift.diagnostics import posterior_predictive_check
+    from swift.diagnostics import (
+        plot_posterior_correlation, posterior_predictive_check,
+    )
     from swift.inference import (
         _make_simulator, rebuild_workflow, run_inference, set_corpus,
     )
@@ -162,27 +164,32 @@ def main() -> None:
     # ------------------------------------------------------------------
     hr("[1/4] REAL VP10 DATA SUMMARY")
     fix = load_fixations(config.FIXATION_PATH)
-    wll, wfl = build_corpus_lists(load_corpus(config.CORPUS_PATH))
-    sk, rf = skip_rate(fix), refix_rate(fix)
+    wfl = build_corpus_lists(load_corpus(config.CORPUS_PATH))
+    train_ids, test_ids = split_half(fix)
+    sk, rf, rg = skip_rate(fix), refix_rate(fix), regression_rate(fix)
+    d = fix["fixation_duration"]
     fps = fix.groupby("sentence_id").size()
     print(f"Fixations              : {len(fix)}")
     print(f"Sentences              : {fix['sentence_id'].nunique()}")
-    print(f"Duration mean +/- std  : {fix['fixation_duration'].mean():.1f} +/- "
-          f"{fix['fixation_duration'].std():.1f} ms")
+    print(f"Duration mean +/- std  : {d.mean():.1f} +/- {d.std():.1f} ms "
+          f"(CV = {d.std() / d.mean():.3f})")
     print(f"Fixations / sentence   : {fps.mean():.2f}")
     print(f"Skip rate              : {sk:.1%}")
     print(f"Refixation rate        : {rf:.1%}")
+    print(f"Regression rate        : {rg:.1%}")
     report["vp10_data"] = {"n_fixations": int(len(fix)),
                            "n_sentences": int(fix["sentence_id"].nunique()),
-                           "duration_mean_ms": float(fix["fixation_duration"].mean()),
-                           "duration_std_ms": float(fix["fixation_duration"].std()),
+                           "duration_mean_ms": float(d.mean()),
+                           "duration_std_ms": float(d.std()),
+                           "duration_cv": float(d.std() / d.mean()),
                            "fixations_per_sentence": float(fps.mean()),
-                           "skip_rate": float(sk), "refix_rate": float(rf)}
+                           "skip_rate": float(sk), "refix_rate": float(rf),
+                           "regression_rate": float(rg)}
 
     # ------------------------------------------------------------------
     # Load model
     # ------------------------------------------------------------------
-    set_corpus(wll, wfl)
+    set_corpus(wfl)
     workflow = rebuild_workflow(config.MODEL_PATH)
 
     # ------------------------------------------------------------------
@@ -221,11 +228,12 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 3. VP10 posterior estimates
     # ------------------------------------------------------------------
-    hr(f"[3/4] VP10 POSTERIOR ESTIMATES  (pooled over {args.n_vp10_readers} random "
-       f"{config.M_SENTENCES}-sentence draws)")
+    hr(f"[3/4] VP10 POSTERIOR ESTIMATES  (train split, pooled over "
+       f"{args.n_vp10_readers} random {config.M_SENTENCES}-sentence draws)")
     rng = np.random.default_rng(args.seed)
     observations, obs_stats = build_reader_batch(
-        fix, m_sentences=config.M_SENTENCES, n_readers=args.n_vp10_readers, rng=rng)
+        fix, m_sentences=config.M_SENTENCES, n_readers=args.n_vp10_readers,
+        rng=rng, sentence_ids=train_ids)
     with contextlib.redirect_stdout(io.StringIO()):  # skip run_inference's own printout
         posterior = run_inference(workflow, observations, obs_stats,
                                   num_samples=args.vp10_samples)
@@ -233,7 +241,7 @@ def main() -> None:
     print(f"{'Parameter':<10}{'Mean':>10}{'95% CI':>22}{'Prior range':>18}")
     print("-" * 62)
     vp10_rows = []
-    units = {"t_sac": "ms", "eta": "", "delta0": "chars", "R": ""}
+    units = {"nu": "", "r": "", "mu_T": "ms"}
     for j, name in enumerate(PARAM_NAMES):
         col = posterior[:, j]
         mean = float(col.mean())
@@ -245,15 +253,21 @@ def main() -> None:
         vp10_rows.append({"parameter": name, "mean": mean, "ci95_low": lo, "ci95_high": hi})
     report["vp10_posterior"] = vp10_rows
 
+    corr = plot_posterior_correlation(posterior)
+    report["posterior_correlation"] = corr.tolist()
+
     # ------------------------------------------------------------------
-    # 4. Posterior predictive check
+    # 4. Posterior predictive check (held-out test split, paper Section 6)
     # ------------------------------------------------------------------
-    hr(f"[4/4] POSTERIOR PREDICTIVE CHECK  (n={args.n_ppc} posterior draws x "
-       f"{config.M_SENTENCES} sentences)")
+    hr(f"[4/4] POSTERIOR PREDICTIVE CHECK  (test split, n={args.n_ppc} posterior "
+       f"draws x {config.M_SENTENCES} sentences)")
+    test_idx = [int(s) - 1 for s in test_ids]
+    real_test = fix[fix["sentence_id"].isin(test_ids)]
     tee = io.StringIO()
     with contextlib.redirect_stdout(_Tee(sys.stdout, tee)):
-        posterior_predictive_check(posterior, fix, wll, wfl, n_ppc=args.n_ppc,
-                                   rng=np.random.default_rng(args.seed + 1))
+        posterior_predictive_check(posterior, real_test, wfl, n_ppc=args.n_ppc,
+                                   rng=np.random.default_rng(args.seed + 1),
+                                   sentence_indices=test_idx)
     report["ppc"] = _parse_ppc_table(tee.getvalue())
 
     dt = time.time() - t_start

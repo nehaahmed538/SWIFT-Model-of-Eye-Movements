@@ -24,13 +24,12 @@ from swift.simulator import PARAM_NAMES, normalise_theta, run_one_reader, sample
 
 # Corpus is set once per worker process via the Pool initializer (avoids
 # pickling the corpus for every task).
-_WLL = None
 _WFL = None
 
 
-def _init_worker(wll, wfl):
-    global _WLL, _WFL
-    _WLL, _WFL = wll, wfl
+def _init_worker(wfl):
+    global _WFL
+    _WFL = wfl
 
 
 def _gen_chunk(args):
@@ -42,11 +41,11 @@ def _gen_chunk(args):
     for i in range(n):
         params = sample_prior(rng)
         thetas[i] = normalise_theta(params)
-        seqs[i], stats[i] = run_one_reader(params, _WLL, _WFL, SEQ_LEN, M_SENTENCES, rng)
+        seqs[i], stats[i] = run_one_reader(params, _WFL, SEQ_LEN, M_SENTENCES, rng)
     return thetas, seqs, stats
 
 
-def generate(wll, wfl, n_readers: int = 8000, n_workers: int | None = None,
+def generate(wfl, n_readers: int = 8000, n_workers: int | None = None,
              seed: int = 42, save_path=TRAINING_DATA):
     n_workers = n_workers or max(1, cpu_count() - 1)
     print("\n" + "=" * 55)
@@ -66,7 +65,7 @@ def generate(wll, wfl, n_readers: int = 8000, n_workers: int | None = None,
     # 'fork' avoids re-importing __main__ in workers (fast, and works when the
     # caller is a heredoc/notebook). Generation is pure NumPy, so fork is safe.
     ctx = mp.get_context("fork")
-    with ctx.Pool(n_workers, initializer=_init_worker, initargs=(wll, wfl)) as pool:
+    with ctx.Pool(n_workers, initializer=_init_worker, initargs=(wfl,)) as pool:
         chunks = pool.map(_gen_chunk, tasks)
     thetas = np.concatenate([c[0] for c in chunks], axis=0)
     seqs = np.concatenate([c[1] for c in chunks], axis=0)

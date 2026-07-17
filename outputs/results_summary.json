@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-11 18:40:58",
+  "generated_at": "2026-07-18 00:11:18",
   "model_path": "outputs/models/swift_approximator.keras",
   "config": {
     "M_SENTENCES": 14,
@@ -11,98 +11,100 @@
     "n_sentences": 114,
     "duration_mean_ms": 196.9407069555302,
     "duration_std_ms": 48.43504001573786,
+    "duration_cv": 0.24593716943787877,
     "fixations_per_sentence": 7.692982456140351,
     "skip_rate": 0.19556451612903225,
-    "refix_rate": 0.10222804718217562
+    "refix_rate": 0.10222804718217562,
+    "regression_rate": 0.020437956204379562
   },
   "recovery": [
     {
-      "parameter": "t_sac",
-      "recovery_r": 0.9896019919847224,
-      "contraction": 0.9781736774946511,
-      "ci95_coverage": 0.9666666666666667
+      "parameter": "nu",
+      "recovery_r": 0.9405635021532757,
+      "contraction": 0.8658806228571974,
+      "ci95_coverage": 0.95
     },
     {
-      "parameter": "eta",
-      "recovery_r": 0.8779312503323025,
-      "contraction": 0.7446047888649174,
-      "ci95_coverage": 0.9466666666666667
-    },
-    {
-      "parameter": "delta0",
-      "recovery_r": 0.513641095784604,
-      "contraction": 0.3140415481544915,
-      "ci95_coverage": 0.9266666666666666
-    },
-    {
-      "parameter": "R",
-      "recovery_r": 0.42130016029344075,
-      "contraction": 0.11350971031390722,
+      "parameter": "r",
+      "recovery_r": 0.9588266429738692,
+      "contraction": 0.903634528046707,
       "ci95_coverage": 0.96
+    },
+    {
+      "parameter": "mu_T",
+      "recovery_r": 0.9965327604552129,
+      "contraction": 0.9902901972612462,
+      "ci95_coverage": 0.9533333333333334
     }
   ],
   "vp10_posterior": [
     {
-      "parameter": "t_sac",
-      "mean": 256.0571317062527,
-      "ci95_low": 232.4052432179451,
-      "ci95_high": 281.8042656779289
+      "parameter": "nu",
+      "mean": 0.3995548353767022,
+      "ci95_low": 0.27715668454766273,
+      "ci95_high": 0.5387517660856246
     },
     {
-      "parameter": "eta",
-      "mean": 0.6181363926185833,
-      "ci95_low": 0.3171095999930407,
-      "ci95_high": 0.915179789525143
+      "parameter": "r",
+      "mean": 6.329671407531202,
+      "ci95_low": 5.270017218589783,
+      "ci95_high": 7.8684378862380955
     },
     {
-      "parameter": "delta0",
-      "mean": 8.31681304048188,
-      "ci95_low": 4.183354114741087,
-      "ci95_high": 14.166590324044227
-    },
-    {
-      "parameter": "R",
-      "mean": 0.37808631894696004,
-      "ci95_low": 0.10873335577646763,
-      "ci95_high": 0.8492561218585868
+      "parameter": "mu_T",
+      "mean": 198.03740204889328,
+      "ci95_low": 182.02678635716438,
+      "ci95_high": 216.08665704727173
     }
+  ],
+  "posterior_correlation": [
+    [
+      1.0,
+      -0.31679058004653105,
+      0.0068061862839479395
+    ],
+    [
+      -0.316790580046531,
+      1.0,
+      0.061312198746435426
+    ],
+    [
+      0.0068061862839479395,
+      0.06131219874643543,
+      1.0
+    ]
   ],
   "ppc": [
     {
-      "statistic": "Mean duration (ms)",
-      "real": 196.94,
-      "simulated": 197.2
+      "statistic": "Mean SFD (ms)",
+      "real": 202.52,
+      "simulated": 204.38
     },
     {
-      "statistic": "Std  duration (ms)",
-      "real": 48.41,
-      "simulated": 54.47
+      "statistic": "Mean GD (ms)",
+      "real": 213.64,
+      "simulated": 212.34
     },
     {
-      "statistic": "Mean fixations/sent",
-      "real": 7.69,
-      "simulated": 7.61
+      "statistic": "Mean TT (ms)",
+      "real": 214.38,
+      "simulated": 220.19
     },
     {
-      "statistic": "Mean landing pos",
-      "real": 3.4,
-      "simulated": 2.85
+      "statistic": "P(skip) (%)",
+      "real": 20.55,
+      "simulated": 18.06
     },
     {
-      "statistic": "Mean saccade amp (words)",
-      "real": 1.12,
-      "simulated": 1.35
+      "statistic": "P(refixation) (%)",
+      "real": 9.09,
+      "simulated": 7.71
     },
     {
-      "statistic": "Skip rate (%)",
-      "real": 19.56,
-      "simulated": 23.31
-    },
-    {
-      "statistic": "Refixation rate (%)",
-      "real": 10.22,
-      "simulated": 9.56
+      "statistic": "P(regression) (%)",
+      "real": 1.82,
+      "simulated": 10.11
     }
   ],
-  "runtime_seconds": 34.7
+  "runtime_seconds": 20.1
 }

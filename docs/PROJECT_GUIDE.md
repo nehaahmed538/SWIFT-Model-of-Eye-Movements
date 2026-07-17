@@ -7,7 +7,16 @@ physically means, the two data files, the full pipeline stage by stage, how
 to run it, how to read every plot it produces, and a glossary of the SBI/
 BayesFlow jargon used throughout. For the numeric results themselves (what
 the trained model actually achieves), see **[RESULTS.md](RESULTS.md)**. For
-a condensed quick-start, see the top-level **[README.md](../README.md)**.
+a condensed quick-start, see the top-level **[README.md](../README.md)**. For
+the equation-by-equation simulator spec, see **[MODEL_SPEC.md](MODEL_SPEC.md)**.
+
+> **2026-07-17 model.** This project implements the **basic 3-parameter**
+> simplified SWIFT model of Engbert & Rabe (2024) — parameters `nu`, `r`,
+> `mu_T` (the paper's own labels). It replaced an earlier simulator that
+> implemented the *full* SWIFT (Gillespie algorithm, activation thresholds,
+> word length, landing positions) under reparametrised non-paper names
+> (`t_sac`, `eta`, `delta0`, `R`). If you find those old names anywhere
+> outside git history, they are stale.
 
 ---
 
@@ -77,15 +86,15 @@ VP10's real data (§7.6) and check the result makes sense (§7.7).
 
 ```
                      ┌─────────────────────────────────────────┐
-                     │   PRIOR: sample θ = (t_sac, eta,         │
-                     │   delta0, R) uniformly from plausible    │
-                     │   ranges                                 │
+                     │   PRIOR: sample θ = (nu, r, mu_T)        │
+                     │   uniformly from plausible ranges        │
                      └───────────────────┬───────────────────────┘
                                           │
                                           ▼
                      ┌─────────────────────────────────────────┐
                      │   SIMULATOR (swift/simulator.py)         │
-                     │   Gillespie stochastic process:          │
+                     │   basic SWIFT: span → activation →       │
+                     │   sine-saliency target + Gamma timer:    │
                      │   θ + corpus sentences → fixation seq.   │
                      └───────────────────┬───────────────────────┘
                                           │  (repeat ~8-14k times)
@@ -134,7 +143,7 @@ swift/                       the importable package — ALL pipeline code lives 
   __init__.py                 (empty, just makes `swift` importable)
   config.py                   paths + pipeline constants + the ONE shared
                                feature-normalisation function
-  simulator.py                the SWIFT forward model (Gillespie algorithm)
+  simulator.py                the SWIFT forward model (basic 3-parameter model)
   data.py                     load the two .dat files, EDA, real-data → network
                                input conversion
   generate.py                 parallel pre-generation of (θ, sequence) training pairs
@@ -149,8 +158,9 @@ data/
 outputs/
   figures/                    every diagnostic PNG (tracked in git — these are the
                                plots that go in the report/slides)
-    baseline_M10/               the OLDER (M=10, LSTM-only, no stat conditions)
-                                 diagnostics, kept for a before/after comparison
+    baseline_M10/               stale diagnostics from the superseded 4-parameter
+                                 (full-SWIFT) model — kept only as historical
+                                 reference, NOT comparable to the current 3-param run
   models/
     swift_approximator.keras  the trained network (gitignored — regenerate locally)
   results_summary.json        machine-readable snapshot written by
@@ -187,60 +197,53 @@ feature scaling — see §6 for why that mattered.
 
 ## 4. The SWIFT model's parameters
 
-### 4.1 The four **free** parameters (what BayesFlow infers)
+### 4.1 The three **free** parameters (what BayesFlow infers)
 
 These are the unknowns. Everything upstream of inference (the prior, the
-simulator, the training data) is built around exactly these four; they are
+simulator, the training data) is built around exactly these three; they are
 defined once in [`swift/simulator.py`](../swift/simulator.py) as
-`PARAM_NAMES = ["t_sac", "eta", "delta0", "R"]` and must stay in that order
-everywhere (theta arrays are always positional, not dict-keyed, once inside
-the pipeline).
+`PARAM_NAMES = ["nu", "r", "mu_T"]` and must stay in that order everywhere
+(theta arrays are always positional, not dict-keyed, once inside the
+pipeline). These are the paper's own labels (Engbert & Rabe 2024, Section 5) —
+the lecturer explicitly asked not to reparametrise. Full equations in
+[MODEL_SPEC.md](MODEL_SPEC.md).
 
 | Symbol | Name | Prior range | What it physically controls |
 |---|---|---|---|
-| `t_sac` | saccade-timer period | 150–350 ms | The base speed of the "saccade timer" — the internal clock that decides when the eye leaves the current word. Smaller `t_sac` → the timer fires sooner → shorter fixations overall. This is the single biggest lever on **fixation duration**. |
-| `eta` | word-length exponent | 0.1–1.0 | How much a word's length slows down processing. In the model, the processing rate scales as `word_length^(-eta)`. `eta=0` → length doesn't matter; `eta=1` → long words are processed proportionally much more slowly. Drives **fixation count and refixation on long words**. |
-| `delta0` | processing-span half-width | 4–15 characters | The width of the "attention window" around the fixated word (in characters). A wide window lets neighbouring words get pre-processed *before* the eye arrives (parafoveal preview), which is what lets short/predictable words be **skipped** entirely. This is the main driver of **skipping rate**. |
-| `R` | refixation-rate factor | 0.1–0.9 | Directly scales the model's tendency to look at the *current* word again (instead of moving on) when it isn't fully processed yet. Drives **refixation rate** (how often two consecutive fixations land on the same word). |
+| `nu`   | processing-span shape | 0–1 | How far processing spreads to neighbouring words. The span puts weight `nu` on the words immediately left/right of fixation and `nu²` two words ahead (Eq. 1–2). Larger `nu` → wider span → more parafoveal preview → more **skipping** and more leftward (regression) processing. Main driver of **skip / regression rate**. |
+| `r`    | overall processing rate | 0–12 | How fast word activation builds up per second (Eq. 3, 6, 7). Higher `r` → words finish processing in a single fixation → fewer **refixations**; lower `r` → words need several looks. Main driver of **refixation rate / fixation count**. |
+| `mu_T` | mean saccade-timer interval | 100–400 ms | The mean of the Gamma-distributed fixation-duration timer (Eq. 10–12). **E[fixation duration] = mu_T exactly.** This is the *only* lever on **fixation duration**, and it is completely decoupled from `nu`/`r` (which affect only *which* words are fixated, not for how long). |
 
-Practical note from this project: `t_sac` and `eta` turn out to be **strongly**
-identifiable from VP10's data (recovery r ≈ 0.99 / 0.88), while `delta0` and
-`R` are only **moderately** identifiable (r ≈ 0.52 / 0.43) — see
-[RESULTS.md](RESULTS.md) for the full discussion. This isn't a bug; it's an
-honest finding about how much a single participant's fixation record can
-constrain the model's "attention window" and "refixation" dynamics.
+Practical note from this project: all three parameters recover **strongly**
+from VP10's data (recovery r ≈ 0.94 / 0.96 / 1.00 for `nu` / `r` / `mu_T`).
+`mu_T` is essentially exact (it is the mean of a Gamma with known shape);
+`nu`/`r` are noisier but clearly identified — and the temporal ⊥ spatial
+decoupling the paper predicts holds (posterior corr `mu_T` vs `nu`,`r` ≈ 0).
+See [RESULTS.md](RESULTS.md) for the full discussion.
 
-### 4.2 The fixed constants (calibrated, not inferred)
+**Emergent, not mechanistic.** Skipping, refixation and regression are **not**
+separate parameters or mechanisms — they *emerge* from the single sine-saliency
+target rule (Eq. 8–9). Adding an explicit skip/refixation/regression term would
+double-count against that rule; don't.
 
-Everything else the simulator needs is held fixed at a value chosen so that
-the simulator's *prior-averaged* behaviour (average over many random draws
-of the 4 free parameters) resembles VP10's real marginal statistics — see
-`tools/calibrate.py`. These are **not** fit to VP10 in the formal SBI sense
-(no posterior over them); they're calibrated once, by hand, to keep the
-simulator physically plausible. This is documented explicitly so nobody
-mistakes them for inferred quantities in the report.
+### 4.2 The fixed constants (only three, all paper values)
 
-Defined in the `FIXED` dict in [`swift/simulator.py`](../swift/simulator.py):
+The basic model has just three fixed constants, all set to Engbert & Rabe's
+own paper values — there is nothing to hand-calibrate. Defined in the `FIXED`
+dict in [`swift/simulator.py`](../swift/simulator.py):
 
 | Symbol | Value | Meaning |
 |---|---|---|
-| `alpha` | 12.0 | Baseline processing difficulty (max "processing units" a word needs) |
-| `beta` | 0.35 | Word-frequency sensitivity — how much rarer words raise difficulty |
-| `h` | 0.65 | Foveal-release strength: the more a fixated word is processed, the faster the saccade timer fires |
-| `gamma` | 3.0 | Sharpness of saccade-target selection (exponent on "how much processing is left" when choosing where to look next) |
-| `kappa` | 0.30 | Forward-saccade distance decay — keeps most saccades short (step to the next word) rather than jumping far ahead |
-| `rho` | 0.15 | Parafoveal attenuation — non-fixated words are processed, but less efficiently than the fixated one |
-| `refix_gain` | 1.0 | Scales how strongly `R` translates into an actual refixation probability |
-| `sigma` | 1.2 | Oculomotor landing-position noise (characters) — real saccades don't land on an exact intended letter |
-| `omega` | 0.05 | Decay rate of a word's activation after it's been fully processed |
+| `eta`   | `1e-3` | Baseline saliency floor — keeps the target-selection denominator > 0 so every word has a tiny non-zero chance of being fixated (Section 3). *(Not the same `eta` as the old model's word-length exponent — same letter, different quantity.)* |
+| `alpha` | `9` | Gamma shape of the fixation-duration timer ⇒ duration CV = 1/√9 = **1/3** by construction (Section 2.4). |
+| `beta`  | `0.6` | Word-frequency effect on a word's maximum activation `a_max = 1 − beta·q` (Section 5 recovery value; free only in the 5-parameter extended model). |
 
-One more constant worth knowing: `SWIFTSimulator.TIMER_THRESHOLD = 14`. A
-single exponential waiting time is too noisy/spread-out to match real
-fixation-duration distributions (which are tight and right-skewed). Instead,
-the saccade timer must accumulate **14** sub-events before it actually fires
-a saccade. Summing 14 exponential waits gives an *Erlang(14)* distribution,
-whose coefficient of variation is `1/√14 ≈ 0.27` — much closer to real data
-than a single exponential (`CV = 1`) would be.
+That's the whole list. The Gamma timer (shape `alpha=9`) directly gives the
+tight, right-skewed fixation-duration distribution real data shows — no
+Erlang/threshold accumulator needed. One structural consequence worth
+reporting: the fixed CV = 1/3 = 0.333 **over-predicts** VP10's real duration
+spread (CV = 0.246), since `alpha` is not free. See
+[RESULTS.md §6](RESULTS.md) "Deviations from paper".
 
 ---
 
@@ -278,9 +281,12 @@ simulator development or BayesFlow training.
 Tab-separated **with a header row**:
 `"sentID"  "nw"  "wordID"  "length"  "freq"  "code"`, loaded with
 `pd.read_csv(path, sep="\t")` and renamed to `sentence_id`, `word_id`,
-`frequency` (`length` stays as-is). This is an *input* to the simulator —
-for every sentence it supplies each word's length (characters) and frequency
-(used in the processing-difficulty equation, §4.2's `alpha`/`beta`).
+`frequency`. This is an *input* to the simulator — for every sentence it
+supplies each word's **frequency**, which sets that word's maximum activation
+`a_max = 1 − beta·q` (higher-frequency words saturate sooner; §4.2's `beta`).
+Note the basic 3-parameter model has **no spatial extent**, so word *length*
+is loaded but not used by the simulator (`build_corpus_lists` returns only the
+frequency list).
 
 > **Gotcha if you open this file in a plain text editor:** the header line's
 > last field is followed directly by the first data row on what looks like
@@ -321,17 +327,17 @@ exactly one place and is imported everywhere else.
 
 | Constant | Value | Why it's set this way |
 |---|---|---|
-| `M_SENTENCES` | 14 | One training example = one simulated "reader" (fixed θ) reading **14** sentences, concatenated into one sequence. A single ~8-fixation sequence carries almost no information about `eta`/`delta0`/`R`; 14 sentences' worth does. This is the single most important modelling decision in the project — see §7.3. |
+| `M_SENTENCES` | 14 | One training example = one simulated "reader" (fixed θ) reading **14** sentences, concatenated into one sequence. A single ~8-fixation sequence carries almost no information about `nu`/`r`; 14 sentences' worth does. This is the single most important modelling decision in the project — see §7.3. |
 | `SEQ_LEN` | 150 | Max concatenated fixations per training example (14 sentences × ~8 fixations + buffer). Sequences are zero-padded/truncated to this length. |
-| `N_FEATURES` | 4 | Per-fixation feature vector: `[word_id, landing_position, duration_ms, word_length]`. |
+| `N_FEATURES` | 2 | Per-fixation feature vector: `[word_id, duration_ms]` — the simplified model's observable `f_i = (fixated word, fixation duration)` (paper Section 4). No landing position or word length (the basic model has no spatial extent). |
 | `N_STATS` | 7 | Length of the hand-crafted summary-statistics vector (§7.4) fed to the network as a direct condition. |
-| `WORDID_SCALE, LANDING_SCALE, DURATION_SCALE, WORDLEN_SCALE` | 20, 10, 1000, 10 | Fixed (not per-sequence) divisors used to bring each raw feature roughly into `[0, 1]`. **Fixed**, not per-sequence-max, on purpose — a per-sequence normalisation would erase the *absolute* magnitude information (e.g. "this word was skipped" is only visible if word-id gaps survive normalisation). |
+| `WORDID_SCALE, DURATION_SCALE` | 20, 1000 | Fixed (not per-sequence) divisors bringing each raw feature roughly into `[0, 1]` (`FEATURE_SCALES`). **Fixed**, not per-sequence-max, on purpose — a per-sequence normalisation would erase the *absolute* magnitude information (e.g. "this word was skipped" is only visible if word-id gaps survive normalisation). |
 
 `normalise_sequence()` and `pad_sequence()` in this file are called by
 **both** the simulator (`swift/simulator.py::run_one_reader`) and the
-real-data loader (`swift/data.py::build_reader_observation`) — that's the
-fix for the bug mentioned above: training and VP10 inference are now
-guaranteed to see identically-scaled inputs.
+real-data loader (`swift/data.py::sentence_features`) — that's the fix for the
+bug mentioned above: training and VP10 inference are now guaranteed to see
+identically-scaled inputs.
 
 ---
 
@@ -343,45 +349,50 @@ Run in this order; each stage's output feeds the next. (This mirrors
 ### 7.1 Load & explore (EDA)
 
 `swift.data.load_fixations` / `load_corpus` / `run_eda`. Prints summary
-statistics for VP10 (fixation count, duration distribution, skip rate,
-refixation rate, fixations/sentence) and saves
-`outputs/figures/eda_fixations.png`. These numbers become the **benchmarks**
-the posterior predictive check (§7.7) compares against later — nothing here
-touches the model.
+statistics for VP10 (fixation count, duration distribution + CV, skip rate,
+refixation rate, regression rate, fixations/sentence, saccade amplitude) and
+saves `outputs/figures/eda_fixations.png`. These numbers become the
+**benchmarks** the posterior predictive check (§7.7) compares against later —
+nothing here touches the model.
 
-### 7.2 The simulator — SWIFT + Gillespie algorithm
+### 7.2 The simulator — basic simplified SWIFT
 
-`swift/simulator.py::SWIFTSimulator.simulate_sentence`. This is the forward
-model: given θ and one sentence's word lengths/frequencies, produce a
-fixation sequence. Two coupled continuous-time random processes run side by
-side:
+`swift/simulator.py::simulate_sentence`. This is the forward model: given θ
+and one sentence's word frequencies, produce a fixation sequence of
+`(word_id, duration_ms)` pairs. Words sit at discrete positions `1..N` with
+**no spatial extent** (no word length, no landing position, no Gillespie
+algorithm). Each fixation cycle does three things (full equations in
+[MODEL_SPEC.md](MODEL_SPEC.md)):
 
-- **Lexical activation** of every word in the sentence (including
-  parafoveal/not-yet-fixated ones, attenuated by `rho`) — words build up
-  "activation" toward a target determined by their difficulty (`alpha`,
-  `beta`) and how close they are to the current fixation (`delta0`, `eta`).
-- **The saccade timer** — accumulates ticks at a rate that rises as the
-  *currently fixated* word gets more processed (`h`). Once it accumulates 14
-  ticks (§4.2), a saccade fires.
+- **Processing span (Eq. 1–2)** — with the eye on word `k`, an asymmetric
+  4-word window accrues processing: weight `sigma` on `k`, `sigma·nu` on
+  `k−1` and `k+1`, `sigma·nu²` on `k+2` (note `k−2` is *not* processed but
+  `k+2` is). `sigma = 1/(1 + 2nu + nu²)` normalises globally.
+- **Activation (Eq. 3, 6, 7)** — each in-span word's activation grows by
+  `r · λ_w · T_seconds`, clamped at `a_max = 1 − beta·q` (frequency-dependent).
+  *(The duration `T` is converted to seconds here — see the unit note below.)*
+- **Target selection (Eq. 8–9)** — a **sine saliency** `s_w = a_max·sin(π·a_w/a_max) + eta`
+  peaks when a word is *half*-processed, so both untouched and finished words
+  are unattractive. The next fixation is drawn ∝ `s_w`. Skipping, refixation
+  and regression **all emerge from this one rule** — there is no explicit
+  mechanism for any of them.
 
-At every step, the **Gillespie algorithm** (a standard method for simulating
-continuous-time stochastic systems, e.g. from chemical-reaction modelling)
-asks: "of all the possible next events (each word's activation ticking up,
-each fully-processed word's activation decaying, or the saccade timer
-ticking), which happens next, and how long do we wait?" It draws a waiting
-time from an exponential distribution whose rate is the *sum* of all event
-rates, then picks *which* event fired proportional to each event's share of
-that total rate. This gives a realistically irregular, randomly-timed
-sequence of fixations rather than a fixed-timestep approximation.
+Fixation **durations** are independent Gamma draws (`shape α=9`, `mean μ_T`,
+Eq. 10–12), completely decoupled from the processing above. That decoupling
+is a deliberate feature of the paper's basic model (Section 4.1): `mu_T`
+affects only durations, `nu`/`r` affect only *which* words are fixated.
 
-When a saccade fires, `_select_target` picks the next word: unprocessed
-words are attractive (weight rises with remaining processing need, sharpened
-by `gamma`), short forward saccades are preferred over long ones (`kappa`),
-regressions are penalised, and the current word gets a refixation bonus
-scaled by `R` and by how much of it is still unprocessed.
+> **Unit note (important):** `r` (paper values 5–10) is a rate *per second*,
+> so the fixation duration `T` (stored in ms) is converted to seconds in the
+> activation term. With `T` in ms, `r·λ·T` reaches the hundreds and every
+> in-span word saturates in one fixation, collapsing the saliency rule and
+> making the scanpath independent of `nu`/`r`. This is the one interpretive
+> choice needed to reconcile the paper's ms wording with its `r` values — see
+> [RESULTS.md §6](RESULTS.md).
 
-**Test it standalone**: `python -m swift.simulator` simulates one sentence
-with a random prior draw and prints the resulting fixations.
+**Test it standalone**: `python -m swift.simulator` runs a self-check that
+asserts the span table matches the paper's Fig. 2 and the timer moments
+(mean ≈ `mu_T`, CV ≈ 1/3), then prints an example fixation sequence.
 
 ### 7.3 Generate training pairs
 
@@ -396,10 +407,11 @@ GPU/ML involved, and saves the result to `data/training_data.npz`
 no real data, at this stage.
 
 Why concatenate sentences instead of training on single sentences? A lone
-~8-fixation sequence barely constrains `eta`, `delta0`, or `R` — there just
-isn't enough evidence in it. Many sentences under the *same* θ give the
-network enough repeated evidence (does this reader consistently skip short
-words? consistently refixate long ones?) to pin those parameters down.
+~8-fixation sequence barely constrains `nu` or `r` — there just isn't enough
+evidence in it. Many sentences under the *same* θ give the network enough
+repeated evidence (does this reader consistently skip words? consistently
+refixate? regress?) to pin those parameters down. (Generation is fast —
+~1700 readers/s — so raising `M_SENTENCES` further is cheap if needed.)
 
 ### 7.4 Train BayesFlow
 
@@ -422,13 +434,15 @@ inverse mapping. Three pieces:
 **Why hand-crafted statistics on top of the LSTM?** This was the single
 biggest improvement in the project. `compute_reader_stats()`
 (`swift/config.py`) computes 7 numbers per reader — mean/std duration, mean
-fixations/sentence, **skip rate**, **refixation rate**, mean saccade
-amplitude, mean landing position — and feeds them to the inference network
+fixations/sentence, **skip rate**, **refixation rate**, **regression rate**,
+and mean saccade amplitude — and feeds them to the inference network
 *directly*, bypassing the LSTM. An LSTM trained on the raw sequence alone
-struggled to reliably extract the skip-rate and refixation-rate signals that
-are exactly what identify `delta0` and `R`; handing the network those
-statistics explicitly roughly **doubled** their recovery (0.32→0.52 for
-`delta0`, 0.26→0.43 for `R` — see [RESULTS.md](RESULTS.md)).
+struggled to reliably extract the skip/refixation/regression signals that are
+exactly what identify `nu` and `r`; handing the network those statistics
+explicitly lifts them to strong recovery (r ≈ 0.94 / 0.96 — see
+[RESULTS.md](RESULTS.md)). The regression rate in particular is the most
+direct signal about `nu`, since `λ_{k−1} = sigma·nu` is the model's only
+source of leftward processing.
 
 `train_offline` (recommended) trains on the pre-generated `.npz` file;
 `train_online` runs the simulator inside the training loop instead (much
@@ -454,35 +468,55 @@ producing a plot in `outputs/figures/`:
   informed the estimate; contraction near 0 = the network learned almost
   nothing (posterior ≈ prior).
 
+Two extra model-validation plots (not network diagnostics — checks that the
+*simulator* matches the paper) are also produced here:
+`span_shape.png` (the processing-span weights vs the paper's Fig. 2) and
+`scanpath_examples.png` (example simulated fixation sequences, cf. Fig. 4).
+
 See §9 for how to read each plot, and [RESULTS.md](RESULTS.md) for what
 these checks concluded for the current trained model.
 
 ### 7.6 Real-data inference on VP10
 
 `swift/inference.py::run_inference`, `swift/data.py::build_reader_batch`.
-This is the **first and only point** real data is used. Since one training
-example is "one θ reading `M_SENTENCES` sentences," VP10 inference draws many
-random 14-sentence subsets of VP10's own sentences, gets a posterior sample
-for each, and **pools** them into one set of posterior draws. (An earlier,
-incorrect version of this step averaged the raw fixation sequences together
-before inference — that's statistically invalid, since averaging sequences
-isn't the same as combining evidence about θ. Pooling posterior samples
-across many draws is the correct way to combine multiple pieces of evidence
-about the same underlying reader.)
+This is the **first and only point** real data is used. VP10's 114 sentences
+are split in half (paper Section 6): inference uses the **first-half** ("train")
+sentences, and the PPC (§7.7) is evaluated on the held-out **second-half**
+("test") sentences via `swift/data.split_half`. Since one training example is
+"one θ reading `M_SENTENCES` sentences," VP10 inference draws many random
+14-sentence subsets of the train split, gets a posterior sample for each, and
+**pools** them into one set of posterior draws. (An earlier, incorrect version
+of this step averaged the raw fixation sequences together before inference —
+statistically invalid, since averaging sequences isn't the same as combining
+evidence about θ. Pooling posterior samples across many draws is the correct
+way to combine evidence about the same underlying reader.)
+
+A **decoupling check** (`plot_posterior_correlation` →
+`posterior_correlation.png`) also runs here: it prints and plots the posterior
+correlation matrix of `nu`/`r`/`mu_T`. The basic model predicts `mu_T` is
+independent of the scanpath, so `mu_T` vs (`nu`, `r`) should be ≈ 0 — a
+direct, quantitative confirmation the decoupling held on real data.
 
 ### 7.7 Posterior predictive check (PPC)
 
 `swift/diagnostics.py::posterior_predictive_check`. Takes the pooled VP10
-posterior samples, re-runs the simulator with them, and compares
-**summary statistics** of the simulated output against VP10's real data:
-mean/std fixation duration, fixations/sentence, mean landing position,
-mean saccade amplitude (how many words the eye jumps per saccade — the
-classic "movement pattern" statistic), skip rate, and refixation rate.
+posterior samples, re-runs the simulator with them (on the held-out **test**
+sentences, §7.6), and compares **six reading measures** of the simulated
+output against VP10's real data:
+
+- **SFD** (single-fixation duration), **GD** (gaze duration), **TT** (total
+  time) — the three standard fixation-duration measures (Section 4);
+- **P(skip)**, **P(refixation)**, **P(regression)** — the movement-pattern
+  probabilities.
+
 Crucially, this compares *statistics*, never raw sequences directly — two
-fixation sequences can differ fixation-by-fixation while still reflecting
-the same underlying reading behaviour, so a raw-sequence comparison would be
-both noisy and the wrong question. This is what `tools/show_results.py`'s
-console table (and `ppc_plot.png`) show.
+fixation sequences can differ fixation-by-fixation while still reflecting the
+same reading behaviour, so a raw-sequence comparison would be both noisy and
+the wrong question. This is what `tools/show_results.py`'s console table (and
+`ppc_plot.png`) show. Current result: durations match within ~6 ms and
+skip/refixation within a couple of points; the model **over-produces
+regressions** (~10% vs VP10's ~2%), an honest limitation reported in
+[RESULTS.md §6](RESULTS.md).
 
 ---
 
@@ -537,20 +571,23 @@ it's purely a report over whatever model is currently saved.
 
 ## 9. How to read every plot
 
-All in `outputs/figures/` (the `baseline_M10/` subfolder holds the same set
-of plots from an earlier, weaker iteration of the model, kept for
-before/after comparison — see [RESULTS.md](RESULTS.md)).
+All in `outputs/figures/` (the `baseline_M10/` subfolder holds stale plots
+from the superseded 4-parameter full-SWIFT model — historical only, not
+comparable to the current run).
 
 | Plot | What's on it | What "good" looks like |
 |---|---|---|
-| `eda_fixations.png` | Real VP10 duration / landing-position / fixations-per-sentence histograms | Just context — no pass/fail, these are the benchmarks PPC compares against later |
+| `span_shape.png` | The processing-span weights `{k−1, k, k+1, k+2}` vs word position, for a few `nu` values | Matches the paper's Fig. 2 — a model check on the simulator, not the network |
+| `scanpath_examples.png` | A few example simulated fixation sequences (word position vs fixation index), cf. Fig. 4 | Plausible left-to-right reading with occasional skips/refixations/regressions |
+| `eda_fixations.png` | Real VP10 duration / saccade-amplitude histograms + skip/refix/regression rates | Just context — no pass/fail, these are the benchmarks PPC compares against later |
 | `training_loss.png` | BayesFlow training loss vs. epoch | Decreasing and flattening out (not still dropping steeply at the last epoch, not diverging) |
-| `recovery_plot.png` | x-axis: true θ (simulated, known) · y-axis: posterior mean, one panel per parameter | Points close to the diagonal line = accurate recovery. A flat cloud (no diagonal trend) = the network isn't learning that parameter from the data |
+| `recovery_plot.png` | x-axis: true θ (simulated, known) · y-axis: posterior mean, one panel per parameter (`nu`, `r`, `mu_T`) | Points close to the diagonal = accurate recovery. `mu_T` sits almost exactly on it; `nu`/`r` are tighter clouds around it |
 | `sbc_histogram.png` | Histogram of the true value's *rank* among posterior samples, per parameter | Roughly flat/uniform. A U-shape means the posterior is too narrow (overconfident); a hump in the middle means too wide (underconfident) |
 | `sbc_ecdf.png` | Same idea as the histogram, but as an ECDF-minus-uniform difference, with confidence bands | The curve should stay inside the shaded band |
-| `contraction_plot.png` | How much narrower each posterior is than the prior, per parameter | Higher = the network is using the data, not just reproducing the prior. Near-zero contraction means "the posterior looks like the prior" — i.e. that parameter isn't identifiable from this kind of data |
-| `posterior_VP10.png` | VP10's actual inferred posterior per parameter (orange), against the flat prior (gray) | A narrow, peaked orange distribution = an informative estimate. A distribution that looks just like the flat gray prior = the data didn't tell us much about that parameter for this specific participant |
-| `ppc_plot.png` | Real VP10 (blue) vs. simulated-from-posterior (orange) histograms for duration / landing / fixations-per-sentence / saccade amplitude, plus a skip/refixation rate bar chart | Substantial overlap between blue and orange. This is the final "does the fitted model actually behave like the real reader" check |
+| `contraction_plot.png` | How much narrower each posterior is than the prior, per parameter | Higher = the network is using the data. Near-zero contraction means "posterior ≈ prior" — that parameter isn't identifiable from this kind of data |
+| `posterior_VP10.png` | VP10's inferred posterior per parameter (orange) against the flat prior (gray) | A narrow, peaked orange distribution = an informative estimate |
+| `posterior_correlation.png` | Heatmap of the VP10 posterior correlation matrix of `nu`/`r`/`mu_T` | `mu_T` vs (`nu`, `r`) cells ≈ 0 — confirms the temporal ⊥ spatial decoupling the basic model predicts |
+| `ppc_plot.png` | Real VP10 (blue) vs. simulated-from-posterior (orange): three duration histograms (SFD/GD/TT) + a skip/refixation/regression probability bar chart | Substantial overlap on durations; the regression bar is the known miss (§7.7). Final "does the fitted model behave like the real reader" check |
 
 ---
 
@@ -572,8 +609,10 @@ before/after comparison — see [RESULTS.md](RESULTS.md)).
 - **Simulation-Based Calibration (SBC)** — a diagnostic (Talts et al. 2018) checking that the posterior's *uncertainty* is honest: across many simulations, the true value should fall at a uniformly random rank within the posterior samples.
 - **Posterior contraction** — `1 − posterior_variance / prior_variance`; how much a parameter's uncertainty shrank after seeing data. Near 1 = highly informative data; near 0 = the data told us almost nothing about that parameter.
 - **Posterior Predictive Check (PPC)** — simulating new data from the *inferred* posterior and comparing summary statistics against the real data, as an end-to-end sanity check of the fitted model.
-- **Gillespie algorithm** — an exact method for simulating continuous-time stochastic systems (originally from chemical kinetics) by repeatedly sampling "which event next, and when" from the combined rates of all possible next events.
-- **Identifiability** — whether a parameter can, even in principle, be pinned down by the kind of data available. A parameter can be "weakly identifiable" not because of a coding bug, but because the data genuinely doesn't constrain it much (this project's honest finding for `delta0`/`R`).
+- **Processing span** — the asymmetric 4-word window `{k−1, k, k+1, k+2}` around the fixated word `k` that accrues activation each fixation, shaped by `nu` (paper Eq. 1–2). The source of parafoveal preview, skipping and regression.
+- **Sine saliency** — the target-selection rule `s_w = a_max·sin(π·a_w/a_max) + eta` (Eq. 8–9): a word is most attractive when *half*-processed, so both untouched and finished words are skipped. Skipping/refixation/regression all emerge from it.
+- **Decoupling (temporal ⊥ spatial)** — in the basic model, fixation *durations* (`mu_T`) are independent of *which* words are fixated (`nu`, `r`); the paper's Section 4.1 property, checked here via `posterior_correlation.png`.
+- **Identifiability** — whether a parameter can, even in principle, be pinned down by the kind of data available. In this project all three parameters (`nu`, `r`, `mu_T`) turn out strongly identifiable once the hand-crafted reading-measure statistics are fed to the network.
 
 ---
 

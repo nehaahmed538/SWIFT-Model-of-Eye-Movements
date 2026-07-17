@@ -15,8 +15,8 @@ Pipeline
   workflow            -> bf.BasicWorkflow
 
 An "observation" is one reader (fixed theta) reading M_SENTENCES sentences,
-their fixations concatenated. That is what lets the network identify the
-word-length / span / refixation parameters, which a single ~8-fixation sequence
+their fixations concatenated. That is what lets the network identify the span
+(nu) and processing-rate (r) parameters, which a single ~8-fixation sequence
 cannot constrain.
 """
 
@@ -52,15 +52,14 @@ from swift.simulator import (
 # ---------------------------------------------------------------------------
 # Module-level corpus state (registered before training / diagnostics)
 # ---------------------------------------------------------------------------
-_WLL = None
 _WFL = None
 _RNG = np.random.default_rng(42)
 
 
-def set_corpus(word_lengths_list, word_freqs_list) -> None:
-    global _WLL, _WFL
-    _WLL, _WFL = word_lengths_list, word_freqs_list
-    print(f"[set_corpus] {len(word_lengths_list)} sentences registered "
+def set_corpus(word_freqs_list) -> None:
+    global _WFL
+    _WFL = word_freqs_list
+    print(f"[set_corpus] {len(word_freqs_list)} sentences registered "
           f"(M_SENTENCES={M_SENTENCES}, SEQ_LEN={SEQ_LEN})")
 
 
@@ -77,18 +76,18 @@ def swift_likelihood(theta: np.ndarray) -> dict:
     """Run the simulator for one reader given normalised theta."""
     fixations, stats = run_one_reader(
         params=denormalise_theta(theta),
-        word_lengths_list=_WLL, word_freqs_list=_WFL,
+        word_freqs_list=_WFL,
         seq_len=SEQ_LEN, m_sentences=M_SENTENCES, rng=_RNG,
     )
     return {"fixations": fixations, "stats": stats}
 
 
 def build_adapter():
-    """theta   -> inference_variables (what we infer)
-    fixations -> summary_variables    (LSTM summary of the raw sequence)
+    """theta   -> inference_variables (what we infer: nu, r, mu_T)
+    fixations -> summary_variables    (summary network over the raw sequence)
     stats     -> inference_conditions (hand-crafted stats fed directly, so the
-                 flow can read delta0 off the skip rate and R off the refixation
-                 rate -- information the LSTM does not reliably extract)."""
+                 flow can read nu/r off the skip / refixation / regression rates
+                 -- information the summary network does not reliably extract)."""
     return (
         bf.Adapter()
         .convert_dtype("float64", "float32")
@@ -119,11 +118,11 @@ def _make_simulator():
 # ---------------------------------------------------------------------------
 
 def train_offline(thetas: np.ndarray, seqs: np.ndarray, stats: np.ndarray,
-                  wll, wfl, n_epochs: int = 80, batch_size: int = 64,
+                  wfl, n_epochs: int = 80, batch_size: int = 64,
                   save_path=MODEL_PATH):
     if not BF_OK:
         raise ImportError("Install BayesFlow: pip install bayesflow keras torch")
-    set_corpus(wll, wfl)
+    set_corpus(wfl)
 
     print("\n" + "=" * 55)
     print("SWIFT - BayesFlow v2 Offline Training")
@@ -144,11 +143,11 @@ def train_offline(thetas: np.ndarray, seqs: np.ndarray, stats: np.ndarray,
     return workflow
 
 
-def train_online(wll, wfl, n_epochs=80, batch_size=64,
+def train_online(wfl, n_epochs=80, batch_size=64,
                  num_batches_per_epoch=200, save_path=MODEL_PATH):
     if not BF_OK:
         raise ImportError("Install BayesFlow: pip install bayesflow keras torch")
-    set_corpus(wll, wfl)
+    set_corpus(wfl)
     workflow = _build_workflow(_make_simulator())
     history = workflow.fit_online(epochs=n_epochs, batch_size=batch_size,
                                   num_batches_per_epoch=num_batches_per_epoch)

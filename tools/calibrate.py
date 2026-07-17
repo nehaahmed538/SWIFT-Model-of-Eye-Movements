@@ -23,32 +23,29 @@ from swift.simulator import SWIFTSimulator, sample_prior
 
 def main(n_readers: int = 400) -> None:
     fix = load_fixations(FIXATION_PATH)
-    wll, wfl = build_corpus_lists(load_corpus(CORPUS_PATH))
+    wfl = build_corpus_lists(load_corpus(CORPUS_PATH))
 
     rng = np.random.default_rng(0)
-    counts, durs, landings = [], [], []
+    counts, durs = [], []
     for _ in range(n_readers):
         p = sample_prior(rng)
-        si = rng.integers(0, len(wll))
-        f = SWIFTSimulator(p).simulate_sentence(wll[si], wfl[si], rng=rng)
+        si = rng.integers(0, len(wfl))
+        f = SWIFTSimulator(p).simulate_sentence(wfl[si], rng=rng)
         counts.append(len(f))
-        for _, lp, dur, _ in f:
+        for _, dur in f:
             durs.append(dur)
-            landings.append(lp)
 
     real_counts = fix.groupby("sentence_id").size().values
     real_dur = fix["fixation_duration"].values
-    real_lnd = fix["landing_position"].values
 
     def line(name, sim, real):
         print(f"  {name:<22} sim {np.mean(sim):7.2f} +/- {np.std(sim):6.2f}"
               f"   real {np.mean(real):7.2f} +/- {np.std(real):6.2f}")
 
-    print(f"\nCalibration over {n_readers} prior draws:")
+    print(f"\nMarginal check over {n_readers} prior draws:")
     line("fixations / sentence", counts, real_counts)
     line("duration (ms)", durs, real_dur)
-    line("landing position", landings, real_lnd)
-    print(f"  words / sentence (corpus): {np.mean([len(w) for w in wll]):.2f}")
+    print(f"  words / sentence (corpus): {np.mean([len(w) for w in wfl]):.2f}")
 
 
 if __name__ == "__main__":
