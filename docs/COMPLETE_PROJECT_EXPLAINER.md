@@ -24,6 +24,17 @@ background can follow along.*
 > **[RESULTS.md](RESULTS.md)** (numbers) — this file is the long-form
 > plain-language companion to those.
 
+> **📊 2026-07-18 analysis expansion.** Parts 11–18 were added: the parameter
+> relationships and which data columns drive which parameter (Part 11), four
+> independent tests that the data genuinely contains information about the
+> parameters (Part 12), a full overfitting analysis (Part 13), convergence
+> (Part 14), comparison with the paper (Part 15), a worked proof that the
+> regression misfit is a model limitation rather than an inference failure
+> (Part 16), a precise plot-by-plot comparison guide (Part 17), and a
+> question-and-answer bank (Part 18). The numbers in those parts were computed
+> directly from `data/training_data.npz` and are reproducible; the commands
+> used are given inline where relevant.
+
 ---
 
 ## How to read this document
@@ -38,11 +49,15 @@ means in this project.** For example:
 > brain can read it.
 
 You will see this pattern throughout the document. There is also a full
-**Glossary** near the end (Part 11) that collects every technical term in one
+**Glossary** near the end (Part 19) that collects every technical term in one
 place, in case you want to look something up without hunting through the whole
 document.
 
-The document is organized into 13 parts:
+The document is organized into 21 parts. Parts 1–10 explain *what the project
+is and what it does*; Parts 11–18 are the deeper analysis — how the parameters
+relate to each other, whether the data actually contains information about
+them, whether the model overfits, how it compares to the original paper, and a
+question-and-answer bank you can revise from:
 
 1. What is this project? (the goal, explained simply)
 2. The big picture (how all the pieces fit together)
@@ -54,9 +69,22 @@ The document is organized into 13 parts:
 8. What actually happens, command by command (tracing the function calls)
 9. How to read every output plot
 10. The final results this project achieved
-11. Glossary
-12. Troubleshooting / FAQ
-13. References
+11. **The parameters in depth** — what each controls, how they interact, and
+    exactly which data columns drive which parameter
+12. **Does the data actually contain information about the parameters?** —
+    the evidence, with numbers
+13. **Overfitting** — why it is an unusual question here, how we checked, and
+    what we found
+14. **Convergence and training health**
+15. **Comparison with the original paper** — and what could vs. could not be
+    improved
+16. **The regression problem** — a worked analysis of the one thing the model
+    gets wrong, and proof of *why*
+17. **Every plot, precisely** — what exactly is being compared to what
+18. **Question-and-answer bank** — likely questions, with answers
+19. Glossary
+20. Troubleshooting / FAQ
+21. References
 
 ---
 
@@ -303,15 +331,28 @@ from the project's root folder (the folder that directly contains `main.py`).
 **Step 1 — Pre-generate the training simulations (do this once).**
 
 ```bash
-python main.py --mode generate --n_readers 10000
+python main.py --mode generate --n_readers 8000
 ```
 
-What this does, in plain words: it runs the SWIFT simulator 10,000 times
+What this does, in plain words: it runs the SWIFT simulator 8,000 times
 (each time with a different random parameter setting), spreads that work
 across all the CPU cores on your machine to go faster, and saves the results
 to `data/training_data.npz`. This step typically takes a few minutes,
 depending on how many CPU cores your machine has. You only need to do this
 once — the results are saved to disk and reused by later steps.
+
+> **Why 8,000?** This is the default (`--n_readers` defaults to 8000 in
+> `main.py`) and, importantly, **it is the number actually used to produce
+> every result in this document** — the saved `data/training_data.npz` contains
+> exactly 8,000 readers. You can pass a larger number, and more data is
+> generally mildly better, but Part 15.5 explains why increasing it would
+> *not* fix this project's one remaining misfit. If you regenerate with a
+> different count, the numbers in Parts 10, 12 and 16 will shift slightly.
+
+> **⚠️ Windows users:** this command will fail with
+> `ValueError: cannot find context for 'fork'`. See Part 20 (Troubleshooting)
+> for why and what to do — the short version is that the saved
+> `data/training_data.npz` already exists, so you can skip straight to Step 2.
 
 **Step 2 — Train the neural network on the saved simulations.**
 
@@ -331,7 +372,7 @@ laptop CPU.
 one command.**
 
 ```bash
-python main.py --mode all --n_readers 10000
+python main.py --mode all --n_readers 8000
 ```
 
 This is exactly Step 1 followed by Step 2, combined into a single command.
@@ -402,14 +443,15 @@ normal workflow.
 
 | Command | What it does | Rough time |
 |---|---|---|
-| `python main.py --mode generate --n_readers 10000` | Pre-generate simulated training examples, save to disk | A few minutes |
+| `python main.py --mode generate --n_readers 8000` | Pre-generate simulated training examples, save to disk | A few minutes |
 | `python main.py --mode train` | Train the network on the saved simulations, then run diagnostics + VP10 analysis + final check | Tens of minutes |
-| `python main.py --mode all --n_readers 10000` | Steps above combined (generate, then train) | Generate + train time combined |
+| `python main.py --mode all --n_readers 8000` | Steps above combined (generate, then train) | Generate + train time combined |
 | `python main.py --mode infer` | Load an already-trained network; skip training; just run diagnostics + VP10 analysis + final check | A few minutes |
 | `python main.py --mode online` | Train with the simulator running live in the loop (slow, rarely used) | Slow |
 | `python tools/show_results.py` | Read-only report of whatever model is currently saved — no training | ~30 seconds |
 | `python tools/show_results.py --quick` | Same as above but tiny sample sizes, for a fast smoke test | ~5 seconds |
 | `python tools/calibrate.py` | Fast, model-free check of the simulator's average behavior vs. real VP10 data | A few seconds |
+| `python tools/analyse_information.py` | Model-free analysis: which statistic carries information about which parameter, and the regression/refixation trade-off (reproduces Parts 12 and 16) | A few seconds |
 
 Every command in this table must be run from the project's root folder (the
 folder containing `main.py`), because the code inside these scripts figures
@@ -457,7 +499,7 @@ the eye on one word. The file has exactly 10 columns:
 | 1 | `sentence_id` | Which sentence this fixation belongs to. Ranges from 1 to 114 (there are 114 sentences total in the experiment). |
 | 2 | `word_id` | The position of the fixated word within its sentence, counting from the start (e.g. word_id = 3 means "the third word of this sentence"). |
 | 3 | `landing_position` | Exactly *where inside the word* the eye landed, measured in characters, and given as a decimal number (e.g. 2.7 means "roughly between the 2nd and 3rd letter of the word"). It's a decimal, not a whole number, because real eye-tracking cameras have some natural jitter/imprecision — the eye doesn't land on an exact letter boundary. |
-| 4 | `fixation_duration` | How long the eye stayed on this word, measured in milliseconds. Typical values in this file range from roughly 80 to 400 ms. |
+| 4 | `fixation_duration` | How long the eye stayed on this word, measured in milliseconds. In this file the values run from **53 ms to 486 ms**, averaging **196.9 ms** with a standard deviation of 48.4 ms — so the large majority of fixations fall between roughly 150 and 250 ms, with a few unusually short and unusually long ones at the extremes. This is the only column that determines `mu_T`. |
 | 5 | `word_length` | How many characters long the *fixated* word is. |
 | 6 | `fixation_type` | A small code: `1` means this was the *first* fixation in the sentence, `2` means it was the *last* fixation in the sentence, and `0` means it was a fixation somewhere in the middle. |
 | 7 | `flag1` | Always equal to 0 in this particular file. Its exact purpose in the original study design is not confirmed, and it is not used anywhere by this project's code. |
@@ -728,7 +770,8 @@ sentence.
 SWIFT-Model-of-Eye-Movements/
 │
 ├── swift/                     <- the actual program logic lives here
-│   ├── __init__.py               (empty; just marks this folder as an
+│   ├── __init__.py               (contains only a one-line docstring; its job
+│   │                              is simply to mark this folder as an
 │   │                              "importable package" so other files can
 │   │                              write `from swift.config import ...`)
 │   ├── config.py                 shared settings: file paths, sequence
@@ -766,7 +809,11 @@ SWIFT-Model-of-Eye-Movements/
 │
 ├── tools/                     <- small standalone helper scripts
 │   ├── calibrate.py               fast, model-free simulator sanity check
-│   └── show_results.py            read-only report of the saved model
+│   ├── show_results.py            read-only report of the saved model
+│   └── analyse_information.py     model-free analysis of which statistic
+│                                   informs which parameter, plus the
+│                                   regression/refixation trade-off
+│                                   (reproduces Parts 12 and 16)
 │
 ├── docs/                      <- written documentation
 │   ├── PROJECT_GUIDE.md           the project's own from-scratch walkthrough
@@ -1042,9 +1089,12 @@ for completeness):
   fixation count, number of sentences, mean and standard deviation of
   fixation duration, the duration coefficient of variation, skip rate,
   refixation rate, regression rate, mean fixations per sentence), and produces
-  and saves an image (`eda_fixations.png`) showing histograms (bar-chart-like
-  plots showing how often each range of values occurs) of fixation duration
-  and saccade amplitude, plus the skip/refixation/regression rates. These
+  and saves an image (`eda_fixations.png`) with **three histograms**
+  (bar-chart-like plots showing how often each range of values occurs):
+  fixation duration, *signed* saccade amplitude (negative values = backward
+  jumps, so regressions are visible as the left-hand tail), and fixations per
+  sentence. The skip/refixation/regression rates are **printed to the
+  terminal**, not drawn on this figure. These
   numbers and plots become the **benchmark values** that the later "does it
   match reality" check (Part 7.6,
   `posterior_predictive_check`) compares the fitted model's simulated
@@ -1073,20 +1123,57 @@ for completeness):
   every possible consecutive pair, across all sentences, and returns the
   overall fraction as the **refixation rate**.
 
-### `saccade_amplitude(fix)`
+### `regression_rate(fix)`
 
 - **File:** `swift/data.py`
 - **Parameters:** `fix` — a fixation table.
+- **What it does:** for every sentence, it puts the fixations in time order and
+  counts how many consecutive pairs moved *backward* (the `word_id` decreased),
+  as a fraction of all **interword** saccades. The "interword" detail matters:
+  the denominator counts only saccades where the word actually changed
+  (`d != 0`), so refixations (staying on the same word) are excluded from the
+  denominator rather than counted as non-regressions. This is the statistic
+  that turns out to be the project's single biggest scientific finding — see
+  Part 16.
+- **Why it exists:** in the model, `lambda_{k-1} = sigma·nu` is the *only*
+  source of leftward (backward) activation, so the regression rate is the most
+  mechanistically direct observable consequence of `nu`. (Part 12 shows that
+  *empirically* the skip rate is an even stronger predictor of `nu`, because
+  regressions are also heavily influenced by `r` — an important nuance.)
+
+### `saccade_amplitude(fix, signed=False)`
+
+- **File:** `swift/data.py`
+- **Parameters:** `fix` — a fixation table; `signed` — if `True`, keep the
+  direction of each jump (positive = forward, negative = backward); if `False`
+  (the default), return only the size of each jump.
 - **What it does:** for every sentence, it measures — between each
   consecutive pair of fixations — how many word-positions the eye moved (the
-  absolute difference between consecutive `word_id` values). It pools these
+  difference between consecutive `word_id` values). It pools these
   measurements across all sentences and returns them as one long list of
   numbers. This is the classic "movement pattern" statistic: for most real
   readers, this list is dominated by small values (mostly 1 — the eye usually
   steps to the very next word), with occasional larger values from skips
-  (jumping 2+ words forward) or regressions (a negative-signed jump backward,
-  though this function only measures the *size* of the jump, not its
-  direction).
+  (jumping 2+ words forward) or regressions (backward jumps). `run_eda` calls
+  it with `signed=True` so the resulting histogram shows regressions as a
+  visible left-hand tail; `compute_reader_stats` uses the unsigned mean.
+
+### `split_half(fix)`
+
+- **File:** `swift/data.py`
+- **Parameters:** `fix` — the real VP10 fixation table.
+- **What it does:** sorts VP10's 114 sentence numbers and cuts them straight
+  down the middle, returning `(first 57 sentence ids, last 57 sentence ids)`.
+- **Why it matters enormously — this is the project's train/test split:** the
+  first half is the **train split**, used to *estimate* VP10's parameters; the
+  second half is the **test split**, used only for the final posterior
+  predictive check. This means the "does the model explain reality?" check in
+  Part 10.4 is performed on sentences that played **no part whatsoever** in
+  producing the parameter estimate. Without this split, the PPC would be
+  marking its own homework — the model would be asked to reproduce the very
+  data that was used to tune it, which would flatter it. This mirrors the
+  paper's own Section 6 procedure. See Part 13 for why this matters for the
+  overfitting question.
 
 ### `synthetic_corpus(n_sentences=114)`
 
@@ -1229,6 +1316,38 @@ for completeness):
   actually emerge. This is exactly analogous to how you couldn't reliably judge
   someone's reading speed from watching them read a single short word — you'd
   want to watch them read several full paragraphs first.
+
+### `_demo()` — the simulator's built-in self-test
+
+- **File:** `swift/simulator.py`
+- **Parameters:** none.
+- **How to run it:** `python -m swift.simulator` (or
+  `python swift/simulator.py`). It needs no data files, no corpus, no trained
+  model — it is completely self-contained and takes about a second.
+- **What it does:** this is the project's **unit test for the simulator**, and
+  it is the reason we can claim the model equations are implemented correctly
+  rather than merely hoping so. It makes three separate assertions:
+  1. **The processing span matches the paper's Figure 2.** It hard-codes the
+     paper's own published reference values for five values of `nu` (0.1, 0.2,
+     0.3, 0.4, 0.6) and checks `span_rates` reproduces them to within 0.001.
+     It also checks the weights always sum to exactly 1.
+  2. **The span is asymmetric in the right direction** — it explicitly verifies
+     that word `k−2` receives *zero* processing while `k+2` receives some. This
+     asymmetry is easy to get backwards when implementing the equations, and it
+     matters: it is what makes the model read forwards.
+  3. **The saccade timer has the right moments.** It simulates 400 sentences
+     and checks the mean fixation duration comes out within 8 ms of `mu_T`, and
+     that the coefficient of variation is within 0.03 of 1/3 — confirming the
+     Gamma distribution is parameterised correctly.
+
+  It also prints the running `TRUNCATIONS` counter, so you can see whether any
+  simulated scanpath hit the `MAX_FIX = 200` safety cap.
+- **Why it matters for the write-up:** if anyone asks "how do you know your
+  simulator actually implements the paper's model?", this is the answer — the
+  span weights are checked against the paper's own published figure, and the
+  duration distribution against its stated moments. Running it after any change
+  to `simulator.py` is the cheapest possible protection against silently
+  breaking the model.
 
 ## 7.4 `swift/generate.py` — pre-generating training data, in parallel
 
@@ -1611,6 +1730,43 @@ linear-algebra operation the network's spline-based component needs.
   `plot_scanpath_examples`, example simulated reading paths, cf. Fig. 4) —
   which validate the simulator itself rather than the network.
 
+### `plot_span_shape(save_dir=FIG_DIR)`
+
+- **File:** `swift/diagnostics.py`
+- **Parameters:** `save_dir` — where to save the image.
+- **What it does:** sweeps `nu` across its whole range (100 values from 0.01 to
+  1.0) and, for each value, records the four processing-span weights
+  (`lambda_-1`, `lambda_0`, `lambda_+1`, `lambda_+2`) that `span_rates`
+  produces for an interior word. It draws all four as curves against `nu` and
+  saves the result as `span_shape.png`.
+- **Why it exists:** this is a **reproduction of Figure 2 of the paper**, and
+  it checks the *simulator*, not the network. It needs no trained model at all.
+  If these curves match the paper's figure, the processing-span equations are
+  implemented correctly. The plot makes the meaning of `nu` visually obvious:
+  at `nu` near 0 the fixated word gets essentially all the processing (weight
+  ≈ 1, a very narrow span), and as `nu` grows the neighbouring words' curves
+  rise while the fixated word's falls — the reader's attention spreads out.
+
+### `plot_scanpath_examples(word_freqs=None, save_dir=FIG_DIR, nu=0.3, r=10.0, mu_T=200.0, n_examples=4, seed=1)`
+
+- **File:** `swift/diagnostics.py`
+- **Parameters:** `word_freqs` — the sentence to read (a default 10-word
+  example is used if none is given); `nu`, `r`, `mu_T` — the parameter values
+  to simulate with; `n_examples` — how many separate example readings to draw;
+  `seed` — for reproducibility.
+- **What it does:** simulates the same sentence being read `n_examples`
+  separate times with the same fixed parameters, and plots each one as a line:
+  fixation number along the horizontal axis, word position on the vertical
+  axis. Saves as `scanpath_examples.png`.
+- **Why it exists:** a **reproduction of Figure 4 of the paper**, and the most
+  intuitive picture in the whole project. Each line is one simulated "reading
+  path." A step up by 1 is a normal forward saccade; a flat step is a
+  refixation; a jump of 2+ is a skip; a step *down* is a regression. Because
+  all four panels use identical parameters, the differences between them show
+  purely how much randomness the model contains — the same reader reading the
+  same sentence twice does not produce the same scanpath. Like `span_shape`,
+  this validates the simulator and needs no trained network.
+
 ### `plot_posterior(posterior_samples, true_params=None, save_dir=FIG_DIR)`
 
 - **File:** `swift/diagnostics.py`
@@ -1737,6 +1893,73 @@ linear-algebra operation the network's spline-based component needs.
   model there are no hand-tuned constants left to calibrate (the three fixed
   constants are all fixed at the paper's values), so this is now only a quick
   marginal sanity check on durations and fixations-per-sentence.
+
+## 7.7b `tools/analyse_information.py` — model-free information analysis
+
+This script produces every number in Parts 12 and 16. Like `calibrate.py` it
+uses **no BayesFlow and no trained model** — it works directly from
+`data/training_data.npz` (where the true parameters are known, because we chose
+them) plus the real VP10 file. That makes it fast (a few seconds) and always
+runnable, even on a fresh clone where the `.keras` model has not been retrained.
+
+### `spearman(a, b)`
+
+- **What it does:** computes the Spearman rank correlation between two arrays,
+  implemented directly in NumPy (by ranking both arrays and correlating the
+  ranks) so the script has no SciPy dependency. Rank correlation is used rather
+  than ordinary correlation because some statistic↔parameter relationships are
+  curved rather than straight lines, and rank correlation handles that.
+
+### `report_correlations(stats, thetas)`
+
+- **What it does:** prints the 7×3 table of Part 12.1 — how strongly each
+  summary statistic tracks each parameter across the simulated readers. This
+  answers "does each parameter leave a fingerprint on behaviour at all?"
+
+### `_knn_r2(Ztr, ytr, Zte, yte, j, k=15)`
+
+- **What it does:** measures how well parameter `j` can be predicted from the 7
+  statistics using a k-nearest-neighbour predictor (find the 15 most similar
+  training readers, average their parameter values), scored as out-of-sample R²
+  on readers the predictor never saw. Deliberately a *dumb* method: the point is
+  to measure how much information the data contains, independently of how good
+  our neural network is.
+
+### `report_information(stats, thetas, seed=0)`
+
+- **What it does:** splits the 8,000 readers into 6,000 train / 2,000 test,
+  standardises the statistics, reports the k-NN R² per parameter, and then runs
+  the **permutation importance** analysis: for each statistic in turn, it
+  scrambles that column across readers (destroying its information while
+  keeping its distribution) and measures how much R² is lost. Produces the
+  tables of Parts 12.2 and 12.3.
+
+### `report_vp10_plausibility(stats, thetas)`
+
+- **What it does:** builds VP10's real summary statistics the same way the
+  pipeline does (`build_reader_batch` on the train half), then reports which
+  **percentile** each of VP10's values sits at within the simulated population
+  — a **prior predictive check**. A value near the 50th percentile means the
+  model produces such readers routinely; below 5 or above 95 flags that the
+  real person sits in the tail of what the model can generate at all. This is
+  what reveals VP10's regression rate at the 2nd percentile (Part 16.3).
+
+### `report_tradeoff(stats, thetas, vp)`
+
+- **What it does:** the decisive analysis of Part 16.3. It selects the
+  simulated readers that closely match VP10 on skip *and* refixation rate and
+  reports their regression rate; then selects those matching VP10's low
+  regression rate and reports *their* skip and refixation rates. It also prints
+  the mean parameters of each group. The output demonstrates that the two
+  groups require incompatible parameter settings — i.e. that no single
+  parameter setting reproduces all of VP10's behaviour, which is the definition
+  of model misspecification.
+
+### `main()`
+
+- **What it does:** runs all four analyses in order, after first printing the
+  sequence-length/truncation summary behind Part 13.6 (how many training
+  readers hit the `SEQ_LEN = 150` cap).
 
 ## 7.8 `tools/show_results.py` — read-only reporting of the current model
 
@@ -1972,7 +2195,7 @@ This section traces, in order, exactly which functions from Part 7 get
 called for each of the main commands from Part 3 — useful as a quick
 reference once you already understand what each individual function does.
 
-## 8.1 `python main.py --mode generate --n_readers 10000`
+## 8.1 `python main.py --mode generate --n_readers 8000`
 
 1. `main.py: step_load()` → `data.py: load_fixations`, `data.py: run_eda`,
    `data.py: load_corpus` (or `data.py: synthetic_corpus` as a fallback),
@@ -2016,12 +2239,13 @@ reference once you already understand what each individual function does.
    `inference.py: sample_posterior()` forty times, pooling the results),
    then `diagnostics.py: plot_posterior()`.
 5. `main.py: step_ppc()` → `diagnostics.py: posterior_predictive_check()`,
-   which internally calls `diagnostics.py: _seq_stats()` many times, plus
-   `data.py: skip_rate()`, `data.py: refix_rate()`, and
-   `data.py: saccade_amplitude()` on the real data, and finally
-   `diagnostics.py: _panel()` and matplotlib saving.
+   restricted to the held-out **test half** of sentences. It calls
+   `diagnostics.py: _sentence_measures()` once per real sentence and once per
+   simulated sentence, pools both through `diagnostics.py: _aggregate()`, and
+   finally draws the figure via `diagnostics.py: _panel()` (three duration
+   panels) plus a bar chart, then prints the PPC summary table.
 
-## 8.3 `python main.py --mode all --n_readers 10000`
+## 8.3 `python main.py --mode all --n_readers 8000`
 
 Exactly 8.1 followed immediately by 8.2 (specifically, `step_generate()` runs
 first, then everything from 8.2's steps 2 onward).
@@ -2084,8 +2308,16 @@ is what each one shows and what a "good" result looks like.
 | `ppc_plot.png` | Real VP10 data (blue) versus data freshly simulated from the estimate (orange): three duration histograms (SFD/GD/TT) plus a bar chart of skip/refixation/regression probabilities. | Substantial overlap on the durations; the regression bar is the known miss (Part 10.4). The final "does the fitted model behave like the real person" check. |
 
 The `outputs/figures/baseline_M10/` subfolder contains stale plots from the
-superseded 4-parameter full-SWIFT model — kept only as historical reference,
-and **not** comparable to the current 3-parameter run.
+superseded 4-parameter full-SWIFT model (at `M_SENTENCES = 10`) — kept only as
+historical reference, and **not** comparable to the current 3-parameter run.
+
+> **This table is the quick reference. [Part 17](#part-17--every-plot-precisely-what-is-compared-to-what)
+> goes much deeper** — in particular it makes explicit *what is being compared
+> to what* in each plot (estimate vs. known truth, real vs. simulated, or real
+> data alone). That distinction is the key to resolving the most common
+> confusion in this project: why `nu` can look excellent in `recovery_plot.png`
+> while the regression bar looks bad in `ppc_plot.png`, with both being true at
+> once.
 
 ---
 
@@ -2190,9 +2422,1162 @@ These are genuine scientific findings about the *simplified* model, confirmed
 by the recovery, contraction, decoupling, and PPC checks above — not bugs. The
 full list lives in [RESULTS.md §6](RESULTS.md).
 
+## 10.6 Where to go next in this document
+
+Parts 1–10 covered what the project is and what it produced. The remaining
+parts analyse *why* those results came out the way they did:
+
+- **Why the regression rate misses by 5× — and proof it is not our fault:**
+  [Part 16](#part-16--the-regression-problem-a-worked-analysis). This is the
+  most important follow-up, and it demonstrates that no parameter setting can
+  match VP10's regression *and* refixation rates simultaneously.
+- **Whether the model overfits:**
+  [Part 13](#part-13--overfitting-why-it-is-an-unusual-question-here-and-what-we-found).
+- **Whether the data even contains information about the parameters:**
+  [Part 12](#part-12--does-the-data-actually-contain-information-about-the-parameters),
+  with four independent lines of evidence.
+- **How the parameters relate to each other and which data columns drive
+  which:** [Part 11](#part-11--the-parameters-in-depth).
+- **How we compare against the original paper, and whether more data or a
+  better network would help:**
+  [Part 15](#part-15--comparison-with-the-original-paper).
+
 ---
 
-# PART 11 — Glossary
+# PART 11 — The Parameters in Depth
+
+Part 5 introduced the three parameters. This part goes much deeper: what each
+one *physically* controls, how they push against each other, and — the question
+most people ask first — in what sense they are or are not "influenced by the
+data."
+
+## 11.1 The question everyone asks first: "are these parameters influenced by the data we trained on?"
+
+This question sounds simple but actually contains three different questions
+tangled together, and they have three *different* answers. Untangling them is
+the single most important conceptual step in understanding this project.
+
+**Question A — "Do the parameter *ranges* (the priors) come from our data?"**
+**No.** The ranges `nu ∈ [0,1]`, `r ∈ [0,12]`, `mu_T ∈ [100,400] ms` are taken
+directly from Engbert & Rabe (2024), Section 5. They were chosen *before* any
+data was looked at, and nobody inspected VP10's recording to pick them. This
+matters: if we had peeked at VP10's mean fixation duration (197 ms) and then
+set the prior to, say, `[190, 205] ms`, we would be smuggling the answer into
+the question, and the resulting "estimate" would be worthless — it could hardly
+have come out any other way.
+
+**Question B — "Are the neural network's internal weights influenced by data?"**
+**Yes — but only by *simulated* data.** The network was trained on 8,000
+simulated readers generated by our own simulator from randomly drawn
+parameters. It never saw VP10's real recording during training, not once. So
+the network's learned skill is "how to read parameters off *any* sequence that
+this simulator could produce," not "how to produce the answer VP10 needs."
+
+**Question C — "Is the final answer for VP10 influenced by VP10's data?"**
+**Yes — and that is entirely the point.** The posterior distribution for VP10
+is exactly "what the parameters probably are, *given VP10's observed
+fixations*." If it were not influenced by VP10's data, the method would have
+failed: the posterior would just be the prior again.
+
+Putting the three together, here is the honest one-sentence answer you can give
+if someone asks:
+
+> The parameters themselves are properties of the *reader*, not of our data.
+> Their plausible ranges came from the published paper, not from our dataset.
+> The network learned how to *recognise* those parameters using only simulated
+> data. And the final estimate for VP10 is driven by VP10's own real fixations
+> — which is exactly what an estimate is supposed to be.
+
+**Why this separation is the whole design.** This is what "amortized" inference
+buys us. Because training used only simulated data with known correct answers,
+we were able to check the network's trustworthiness thoroughly (Part 10.2)
+*before* pointing it at the real person. The real data is spent once, at the
+very end, on the question we actually care about. Nothing is spent on tuning.
+
+## 11.2 What each parameter physically controls
+
+| Parameter | The single sentence version | Turn it **up** and… | Turn it **down** and… |
+|---|---|---|---|
+| `nu` (0–1) | How wide the reader's attention window is | Neighbouring words get pre-processed, so more words are already "finished" when the eye arrives → **more skipping**; the word to the left also gets processed → **more regressions**; jumps get longer | Attention is narrow, almost all processing goes to the fixated word → the eye plods word by word, few skips |
+| `r` (0–12) | How fast words get processed per second of looking | Words finish within one fixation → **few refixations**, **fewer fixations per sentence**, faster reading | Words need several visits to finish → **many refixations**, **more fixations per sentence** |
+| `mu_T` (100–400 ms) | How long each individual pause lasts | Every fixation is simply longer | Every fixation is simply shorter |
+
+The crucial structural fact, worth memorising: **`nu` and `r` control *where*
+the eye goes; `mu_T` controls only *how long* it stays.** They are two separate
+machines in the model that do not talk to each other.
+
+## 11.3 How the parameters relate to each other
+
+This is a question the project can answer *with measured numbers*, not just
+theory. The correlation matrix of VP10's estimated posterior
+(`posterior_correlation.png`) is:
+
+```
+              nu       r    mu_T
+nu         1.000  -0.317   0.007
+r         -0.317   1.000   0.061
+mu_T       0.007   0.061   1.000
+```
+
+Read this as "when the model considers explanations of VP10's data, do these
+two dials move together?"
+
+**`mu_T` vs `nu` (0.007) and `mu_T` vs `r` (0.061): essentially zero.** This is
+the **decoupling** result, and it is a genuine scientific confirmation, not a
+formality. The paper's basic model *predicts* that timing and scanpath should
+be independent, because fixation durations are drawn from a Gamma distribution
+that never consults the activation state. Our estimate on real human data
+confirms it. Practically, this means you could get `mu_T` badly wrong and it
+would not corrupt `nu` or `r` at all — the duration evidence and the scanpath
+evidence are processed separately.
+
+**`nu` vs `r` (−0.317): a real, moderate negative trade-off.** This is the one
+genuine interaction in the model, and it deserves a plain-language explanation
+because it comes up repeatedly (and is the subject of Part 16).
+
+Both `nu` and `r` control how quickly words reach "finished." A wide span (high
+`nu`) spreads processing to more words at once; a fast rate (high `r`) pours
+more processing in per second. **Two different dial settings can therefore
+produce a very similar amount of total processing**, which means the data
+cannot fully distinguish between them. If the network raises its estimate of
+`nu`, it must lower its estimate of `r` to keep the predicted behaviour
+matching what was observed — hence the negative correlation.
+
+The number −0.317 is the honest measure of how much they blur together. It is
+**moderate, not severe**: at −0.9 you would say the two parameters are barely
+distinguishable and should perhaps be combined into one; at −0.317 they are
+clearly separable but not fully independent. This is consistent with both
+recovering strongly (0.941 and 0.959, Part 10.2) — the data *can* tell them
+apart, just not perfectly.
+
+**What breaks this trade-off?** The two parameters have different
+*signatures*, which is exactly why they are separable at all:
+- `r` shows up most strongly in the **refixation rate** and **fixations per
+  sentence** — how often the eye has to come back to the same word.
+- `nu` shows up most strongly in the **skip rate** and **saccade amplitude** —
+  how far ahead the eye jumps.
+
+Because these are different observable measures, feeding both to the network
+(as two of the seven hand-crafted statistics) is what lets it disentangle the
+two. Part 12 shows this with measured numbers.
+
+## 11.4 The fixation-sequence file: the header it does not have
+
+`fixseqin_PB2expVP10.dat` has **no header row** — the first line is already
+data. If you want to open it in Excel or R and see meaningful column names,
+here is the header line to paste on top (space-separated, matching
+`FIXATION_COLUMNS` in `swift/data.py`):
+
+```
+sentence_id word_id landing_position fixation_duration word_length fixation_type flag1 flag2 fixation_index participant_id
+```
+
+A real line from the file, lined up against those names:
+
+```
+sentence_id    word_id  landing_position  fixation_duration  word_length  ...
+          1          1              2.30                183            5  ...
+```
+
+meaning: *in sentence 1, the eye fixated word 1, landing 2.3 characters into
+it, and stayed for 183 ms; that word is 5 characters long.*
+
+## 11.5 Which columns actually drive which parameter
+
+This is the practical version of "where does each estimate come from?" Of the
+**ten** columns in the fixation file, this project's simplified model uses
+only **three**, and each parameter is driven by a different aspect of them.
+
+| Parameter | Driven by which column(s) | Through what mechanism |
+|---|---|---|
+| `mu_T` | **`fixation_duration`** (column 4) — and *nothing else* | The mean of the durations. Since `E[duration] = mu_T` by construction, this is almost a direct read-off. |
+| `r` | **`word_id`** (column 2), ordered by **`fixation_index`** (column 9) | Detected via how often consecutive fixations land on the *same* word (refixation rate) and how many fixations each sentence needs. |
+| `nu` | **`word_id`** (column 2), ordered by **`fixation_index`** (column 9) | Detected via which word positions get *no* fixation (skip rate), how far consecutive fixations jump (saccade amplitude), and how often the sequence steps backward (regression rate). |
+
+And the columns that are **not** used at all:
+
+| Column | Why it is unused |
+|---|---|
+| `landing_position` (3) | The simplified model has no spatial extent — words are points at positions 1, 2, 3, …, so "where inside the word" has no meaning in this model. |
+| `word_length` (5) | Same reason. The full SWIFT model uses word length; the basic model does not. |
+| `fixation_type` (6) | Not needed — `fixation_index` already gives ordering. |
+| `flag1`, `flag2` (7, 8) | Always 0 in this file; purpose unknown. |
+| `sentence_id` (1) | Used for *grouping and ordering* (splitting fixations into sentences, and for the train/test split), not as a direct signal about any parameter. |
+| `participant_id` (10) | Always 10 — this file is one participant only. |
+
+**The single most useful takeaway from this table:** `mu_T` reads off column 4,
+while `nu` and `r` read off column 2. They use *different columns*. This is the
+mechanical reason for the decoupling result in 11.3 — it is not a coincidence
+or a lucky finding, it is baked into which numbers each parameter can even see.
+
+And from the corpus file, exactly one column feeds the model: **`freq`** (word
+frequency), which sets each word's maximum activation `a_max = 1 − beta·q`.
+Rarer words need more processing. `length` and `code` are loaded but unused.
+
+---
+
+# PART 12 — Does the Data Actually Contain Information About the Parameters?
+
+Before trusting any estimate, there is a question that must be asked first, and
+it is *not* about the neural network: **is the information even there?** If
+VP10's fixations simply do not contain any trace of `nu`, then no network —
+however large or well-trained — could ever recover it. You would be estimating
+noise.
+
+This part answers that question with measured numbers rather than assertions.
+It is the part to read if someone asks "how do you know the network isn't just
+making things up?"
+
+> **Every number in this part (and in Part 16) is reproducible in a few seconds
+> with:**
+>
+> ```bash
+> python tools/analyse_information.py
+> ```
+>
+> That script needs **no trained model** — it works directly from
+> `data/training_data.npz`, where the true parameters are known because we
+> chose them. So it runs even on a fresh clone where the `.keras` file has not
+> been retrained yet.
+
+## 12.1 Test 1 — Do the summary statistics move when the parameters move?
+
+The first, simplest check: take the 8,000 simulated readers in
+`data/training_data.npz` (where the true parameters are known exactly, because
+we chose them), and measure the correlation between each of the 7 hand-crafted
+statistics and each of the 3 parameters. If a parameter genuinely leaves a
+fingerprint on behaviour, some statistic must move when it moves.
+
+Measured Spearman correlations (a robust measure of "do these move together,"
+where 0 = no relationship and ±1 = a perfect relationship):
+
+| Statistic | vs `nu` | vs `r` | vs `mu_T` |
+|---|---:|---:|---:|
+| mean duration | −0.002 | 0.009 | **0.996** |
+| std. dev. of duration | −0.001 | 0.004 | **0.979** |
+| fixations per sentence | −0.035 | **−0.698** | −0.305 |
+| skip rate | **0.610** | 0.529 | 0.293 |
+| refixation rate | 0.222 | **−0.720** | −0.356 |
+| regression rate | 0.443 | −0.567 | −0.215 |
+| saccade amplitude | **0.722** | 0.286 | 0.228 |
+
+Several things jump out, and each one is worth being able to explain:
+
+**`mu_T` is essentially solved by one number.** Its correlation with mean
+duration is 0.996 — almost perfect. This is why `mu_T` recovers at 0.997 in
+Part 10.2. It is not that the network is clever about `mu_T`; it is that `mu_T`
+*is* the mean duration, by the model's own construction.
+
+**Duration statistics carry nothing about `nu` and `r`** (correlations of
+−0.002 and 0.009 — indistinguishable from zero). This is the decoupling of
+Part 11.3, visible directly in the training data. The two halves of the model
+really do not leak into each other.
+
+**`r` is best revealed by the refixation rate (−0.720) and fixations per
+sentence (−0.698)**, both negative: a faster reader revisits words less and
+needs fewer fixations. Exactly as the mechanism predicts.
+
+**`nu` is best revealed by saccade amplitude (0.722) and skip rate (0.610)** —
+a wider span means longer jumps and more skipped words.
+
+**An important correction to a claim you may see elsewhere in this project.**
+The code comments in `swift/config.py` and `swift/data.py` describe the
+*regression rate* as "the most direct observable signal about `nu`." That is
+true **mechanistically** — leftward processing (`lambda_-1 = sigma·nu`) is the
+model's only source of backward jumps, so without `nu` there would be no
+regressions at all. But **empirically it is not the strongest signal**: the
+regression rate correlates 0.443 with `nu`, while saccade amplitude correlates
+0.722 and skip rate 0.610. The reason is that the regression rate is also
+strongly pulled by `r` (−0.567) — a slow reader lingers and drifts backward
+more — so as a *marginal* signal it is muddied. Both statements are correct;
+they answer different questions. If asked, the precise answer is: *"regression
+rate is the only mechanism by which `nu` creates backward movement, but skip
+rate and saccade amplitude are the statistics that predict `nu` best in
+practice, because regressions are confounded by `r`."*
+
+## 12.2 Test 2 — How much information is there in total?
+
+Correlations only measure one statistic at a time, and only straight-line
+relationships. A stronger test: **can the 7 statistics, taken together, predict
+the parameters at all** — using a simple, dumb method with no neural network
+involved?
+
+Using a plain nearest-neighbour predictor (find the 15 most similar simulated
+readers and average their parameters), trained on 6,000 readers and tested on
+the 2,000 it had never seen:
+
+| Parameter | Predictable from the 7 statistics alone (out-of-sample R²) |
+|---|---:|
+| `nu` | 0.844 |
+| `r` | 0.858 |
+| `mu_T` | 0.978 |
+
+(R² of 1.0 means perfectly determined; 0.0 means the statistics tell you
+nothing.)
+
+**This is the key result of this part.** Even a crude method with no learning
+worth speaking of recovers 84–98% of the variance in the parameters. The
+information is unambiguously present in the data. The estimation problem is
+genuinely solvable, and the network is not inventing anything.
+
+For comparison, the trained BayesFlow network achieves recovery correlations of
+0.941 / 0.959 / 0.997, which correspond to roughly **0.89 / 0.92 / 0.99** in
+the same R²-like units. So:
+
+| Parameter | Nearest-neighbour on 7 stats | Full trained network | Gain from the network |
+|---|---:|---:|---:|
+| `nu` | 0.844 | ~0.885 | +0.04 |
+| `r` | 0.858 | ~0.919 | +0.06 |
+| `mu_T` | 0.978 | ~0.994 | +0.02 |
+
+*(These are measured slightly differently, so treat the gap as indicative
+rather than exact.)*
+
+**How to interpret this honestly, and it is an important admission:** the
+seven hand-crafted statistics are doing **most** of the work. The neural
+network — the LSTM summary network reading the raw sequence, plus the spline
+coupling flow — adds a real but *modest* improvement on top. What the network
+genuinely adds that the nearest-neighbour method cannot is a **calibrated
+posterior distribution**: honest uncertainty, verified by the SBC checks, not
+just a point guess. That is the actual product here. But if someone claims "the
+deep learning is what cracked this problem," the honest answer is: no, the
+feature engineering did most of it, and the network's contribution is
+principled uncertainty plus a modest accuracy gain.
+
+## 12.3 Test 3 — Permuting the information (which statistic matters for which parameter?)
+
+The most direct test of "does this input actually matter?" is to **destroy it
+and see what breaks**. Take the test set, shuffle *one* statistic's column at
+random across readers — so that statistic is still present and still has the
+same overall distribution, but is now paired with the wrong reader, carrying no
+real information — and measure how much predictive accuracy is lost. This is
+called **permutation importance**, and it is exactly the "permute the info"
+check.
+
+Measured drop in R² when each statistic is scrambled:
+
+**For `nu` (baseline R² = 0.844):**
+
+| Statistic scrambled | R² lost |
+|---|---:|
+| skip rate | **0.919** |
+| regression rate | 0.417 |
+| refixation rate | 0.241 |
+| saccade amplitude | 0.093 |
+
+**For `r` (baseline R² = 0.858):**
+
+| Statistic scrambled | R² lost |
+|---|---:|
+| refixation rate | **0.445** |
+| regression rate | 0.169 |
+| saccade amplitude | 0.162 |
+| mean duration | 0.134 |
+
+**For `mu_T` (baseline R² = 0.978):**
+
+| Statistic scrambled | R² lost |
+|---|---:|
+| mean duration | **0.636** |
+| std. dev. of duration | 0.355 |
+| saccade amplitude | 0.003 |
+| refixation rate | 0.003 |
+
+*(A drop larger than the baseline R² simply means that scrambling that input
+makes predictions worse than useless — actively misleading, because the
+predictor is relying on it heavily.)*
+
+What this establishes, and these are strong, defensible claims:
+
+1. **`nu` depends overwhelmingly on the skip rate.** Remove it and the estimate
+   collapses entirely. If you had to keep only one statistic to estimate `nu`,
+   it would be the skip rate.
+2. **`r` depends primarily on the refixation rate**, with the regression rate
+   and saccade amplitude as secondary support. No single statistic is as
+   dominant for `r` as skip rate is for `nu` — the evidence for `r` is spread
+   across several measures.
+3. **`mu_T` depends only on the two duration statistics.** Scrambling the
+   scanpath statistics (saccade amplitude, refixation rate) costs 0.003 — i.e.
+   nothing. **This is the decoupling result proven a third independent way**:
+   the scanpath statistics carry literally no usable information about `mu_T`.
+4. **Every one of the 7 statistics earns its place.** None is dead weight.
+
+This analysis is also the ready-made answer to "why did you include those seven
+statistics and not others?" — because each one demonstrably carries information
+about at least one parameter, and removing any of them measurably hurts.
+
+## 12.4 Test 4 — Posterior contraction (does the network use the information?)
+
+Tests 1–3 show the information exists. Contraction shows the *trained network
+actually uses it*. Contraction is `1 − (posterior variance ÷ prior variance)`:
+how much narrower the answer became after seeing the data.
+
+| Parameter | Contraction | Meaning |
+|---|---:|---|
+| `nu` | 0.866 | The posterior is ~87% narrower than the prior |
+| `r` | 0.904 | ~90% narrower |
+| `mu_T` | 0.990 | ~99% narrower |
+
+A contraction near **0** would be the warning sign: it would mean the network
+looked at the data, learned nothing, and simply handed the prior back. Nothing
+here is anywhere near that. All three parameters are strongly informed by the
+data.
+
+## 12.5 Summary: four independent lines of evidence
+
+| Test | What it rules out | Result |
+|---|---|---|
+| Statistic↔parameter correlations | "The parameters leave no trace in behaviour" | Ruled out — strong correlations for all three |
+| Nearest-neighbour predictability | "The information is too weak/tangled to use" | Ruled out — R² 0.84–0.98 without any network |
+| Permutation importance | "The model relies on the wrong things" | Ruled out — each parameter depends on the mechanistically correct statistics |
+| Posterior contraction | "The network ignores the data" | Ruled out — 87–99% contraction |
+
+If someone asks "how do you know your estimates mean anything?", these four
+tests, in this order, are the answer.
+
+---
+
+# PART 13 — Overfitting: Why It Is an Unusual Question Here, and What We Found
+
+"Does it overfit?" is the standard question to ask of any machine-learning
+project, and it deserves a careful answer. In this project the answer is
+genuinely interesting, because the usual way of overfitting is **structurally
+impossible here** — while a *different*, less obvious risk does exist.
+
+## 13.1 What overfitting means, in plain words
+
+**Overfitting** (literal sense: fitting *too* closely) is when a model
+memorises the specific examples it was trained on — including their random
+noise — instead of learning the general pattern. The symptom is always the
+same: excellent performance on training data, poor performance on anything new.
+The classic analogy is a student who memorises the answers to last year's exam
+paper instead of learning the subject: perfect on that paper, lost on this
+year's.
+
+## 13.2 Why the usual kind of overfitting cannot happen here
+
+In ordinary machine learning, training data is scarce and fixed: you have
+10,000 photos, and that is all you will ever have, so the network sees each one
+many times and can memorise them.
+
+Here, **training data is generated on demand and is effectively unlimited.**
+The simulator can produce a brand-new reader, with a brand-new random parameter
+draw and brand-new random behaviour, as many times as we like. Three
+consequences follow:
+
+1. **Every validation reader is genuinely new.** The 300 readers used for the
+   recovery/SBC diagnostics are freshly simulated at diagnostic time
+   (`simulator.sample(n_val)` in `run_builtin_diagnostics`). They were *not*
+   held out of a fixed dataset — they did not exist during training. The
+   network cannot have memorised them.
+2. **There is no shortage of data to overfit against.** With `--mode online`,
+   the network would see every example exactly once and overfitting would be
+   impossible by construction. Our normal route (`--mode train`, which calls
+   `train_offline`) re-uses the 8,000 saved readers across 80 epochs, which
+   *does* create some memorisation risk — see 13.4.
+3. **The real data was never in training at all.** VP10's recording appears
+   only at the very end. The network cannot overfit to data it has never seen.
+
+## 13.3 An honest note about what the training code does *not* do
+
+This is worth stating plainly, because a careful reader will notice it:
+
+```python
+history = workflow.fit_offline(data=data, epochs=n_epochs, batch_size=batch_size)
+```
+
+There is **no `validation_data` argument**. That means `training_loss.png`
+shows the *training* loss only — there is no validation-loss curve on it. So
+**the loss plot on its own cannot tell you whether the model overfits.** If you
+are asked "how would you see overfitting in your loss curve?", the correct
+answer is: *"we would not — our loss curve only shows training loss. We check
+overfitting a different and stronger way."*
+
+That stronger way is the diagnostics suite. In simulation-based inference, the
+recovery / SBC / contraction checks on **300 freshly simulated readers** are a
+better overfitting test than a validation-loss curve, because they measure the
+thing we actually care about (are the posteriors accurate and honestly
+calibrated on new data?) rather than a proxy loss number. A validation-loss
+curve would still be a nice addition for the report, and adding
+`validation_data` to `fit_offline` is the obvious small improvement.
+
+## 13.4 The actual evidence that we are not overfitting
+
+The decisive numbers, all computed on data the network never trained on:
+
+| Evidence | Value | Why it rules out overfitting |
+|---|---|---|
+| Recovery on 300 fresh simulations | r = 0.941 / 0.959 / 0.997 | An overfitted network would do well on training data and *badly* here. It does well here. |
+| 95% interval coverage | 95.0% / 96.0% / 95.3% | This is the clincher — see below. |
+| SBC calibration plots | Within the confidence bands | Ranks are uniform, meaning no systematic over- or under-confidence. |
+| PPC on held-out **test-half** sentences | Durations within ~6 ms | The final check uses sentences excluded from fitting entirely. |
+
+**Why coverage is the strongest single piece of evidence.** Coverage asks: when
+the network says "I am 95% confident the true value lies in this range," is the
+true value actually inside that range 95% of the time? We measured 95.0%, 96.0%
+and 95.3% — essentially perfect.
+
+An overfitted network is characteristically **overconfident**: having
+memorised its training examples, it believes it knows more than it does, and
+produces intervals that are too narrow. That would show up immediately as
+coverage well below 95% (say 70–80%), and as a U-shaped SBC histogram. We see
+neither. The network's humility is calibrated correctly, which is very hard to
+fake while overfitting.
+
+There is one caveat worth stating for completeness: because training re-uses
+8,000 saved readers for 80 epochs, mild memorisation is *possible* in
+principle. The recovery and coverage numbers above show it is not happening to
+any degree that matters. If you wanted to be certain, the cheap test is to
+regenerate the training set with a different seed, retrain, and confirm the
+diagnostics land in the same place.
+
+## 13.5 The seven design choices that prevent overfitting
+
+Worth being able to list, since each is a deliberate decision:
+
+1. **Fresh simulations for validation** — diagnostics never re-use training
+   examples.
+2. **A train/test split on the real data** (`split_half`) — parameters are fit
+   on VP10's first 57 sentences, and the PPC is run on the other 57.
+3. **The real data is used exactly once**, at the end. No tuning against it.
+4. **The prior comes from the paper**, not from inspecting our data.
+5. **Fixed normalisation constants** (`WORDID_SCALE`, `DURATION_SCALE`) rather
+   than statistics computed from the data — so no information leaks from the
+   dataset into the preprocessing.
+6. **A small network** (64-dimensional summary, 6 coupling layers) relative to
+   8,000 training examples — limited capacity to memorise.
+7. **The fixed constants were never hand-tuned to fit VP10** — `eta`, `alpha`,
+   `beta` are all at the paper's published values.
+
+Point 4 and point 7 are the ones people forget, and they are the ones that
+would be most damaging if violated. Choosing a prior or tuning a constant after
+looking at the answer is a subtle, serious form of overfitting that no
+validation curve would ever catch.
+
+## 13.6 The one genuine train/serve mismatch we did find
+
+Being thorough means reporting what the checks *did* turn up. Comparing the
+simulated training sequences against VP10's real sequences:
+
+| | Simulated training readers | VP10's real observations |
+|---|---|---|
+| Mean fixations per observation | 123.3 | 106.8 |
+| Longest observation | 150 (the cap) | 116 |
+| Observations hitting the `SEQ_LEN = 150` cap | **2,338 of 8,000 (29%)** | **0 of 40** |
+
+Nearly a third of training sequences are **truncated** at 150 fixations, losing
+their tail — while no real VP10 observation ever comes close to the cap. So the
+LSTM summary network is partly trained on chopped-off sequences of a kind it
+never encounters at inference time.
+
+**How much does this matter? Less than it first appears**, for a specific
+reason worth understanding: the 7 hand-crafted statistics are computed from the
+per-sentence arrays **before** padding and truncation
+(`compute_reader_stats(rows)` in `run_one_reader`), so they are completely
+unaffected. Since Part 12 showed the statistics carry most of the information,
+the damage is limited to the LSTM's contribution — which is the smaller part.
+This may in fact be *part of the reason* the LSTM contributes less than the
+hand-crafted statistics do.
+
+Truncation mostly affects slow readers (low `r`), who produce many fixations.
+It is therefore a mild, systematic bias in the training distribution rather
+than random noise. **The fix is straightforward and worth listing as future
+work: raise `SEQ_LEN` from 150 to about 250**, which would cost a little memory
+and nothing else. This is a real, actionable finding that came out of writing
+this documentation.
+
+## 13.7 What overfitting *would* have looked like
+
+So you can recognise it if it ever appears:
+
+- Recovery correlations high on training data but dropping sharply on fresh
+  simulations.
+- 95% coverage well below 95% (e.g. 70%) — overconfident intervals.
+- A **U-shaped** SBC histogram (too many true values in the extreme tails).
+- The SBC ECDF curve wandering outside its shaded band.
+- Posteriors that are suspiciously narrow — near-zero width for parameters
+  that should be uncertain.
+- A PPC that matches on the train-half sentences but falls apart on the
+  held-out test half.
+
+None of these are present. The one clear mismatch we *do* have (regressions,
+Part 16) has the opposite signature entirely: it fails on **both** simulated
+and real data in the same way, which is the fingerprint of a **model
+misspecification**, not overfitting.
+
+---
+
+# PART 14 — Convergence and Training Health
+
+## 14.1 What "convergence" means
+
+**Convergence** (literal meaning: coming together toward a point) is the point
+during training when the network stops meaningfully improving. Training works
+by repeatedly nudging the network's internal numbers to reduce the **loss** (a
+single number measuring how wrong it currently is). Early on, each nudge helps
+a lot. Eventually the improvements shrink to nothing and the loss flattens —
+that is convergence. Training beyond that point mostly wastes time.
+
+## 14.2 How to check convergence in this project
+
+**Primary check — the loss curve** (`outputs/figures/training_loss.png`,
+produced automatically by `_save_loss` after training). What you want to see:
+
+- A **steep drop** over the first several epochs — the network rapidly learning
+  the obvious structure (chiefly the `mu_T`↔duration relationship).
+- A **gradual flattening** into a plateau.
+- The final stretch (the last 10–20 epochs of the 80) **roughly level**, with
+  only small random wobble.
+
+If the curve is still dropping steeply at epoch 80, training stopped too early
+and `--n_epochs` should be raised. If it drops and then rises, or oscillates
+violently, something is wrong (usually the learning rate, or bad input scaling).
+
+**A caveat you must state:** as covered in Part 13.3, this curve is
+*training* loss only. A flat training loss proves the network stopped learning;
+it does **not** by itself prove the network learned anything *useful*. For that
+you need the second check.
+
+**Secondary check — and the one that actually matters — the diagnostics.** A
+properly converged, useful model shows:
+
+| Signal | Converged and healthy | Not converged |
+|---|---|---|
+| Recovery correlation | High (ours: 0.94–1.00) | Low, points scattered off the diagonal |
+| Contraction | High (ours: 0.87–0.99) | Near 0 — posterior ≈ prior |
+| 95% coverage | ≈ 95% (ours: 95.0–96.0%) | Far from 95% |
+| SBC ECDF | Inside the band | Wandering outside it |
+
+By every one of these, our model has converged. This is the important point:
+**convergence is not judged by the loss number alone, but by whether the
+posteriors are accurate and calibrated on fresh data.**
+
+## 14.3 The settings that control training, and what each one does
+
+| Setting | Default | What it does | What happens if it is too low | Too high |
+|---|---|---|---|---|
+| `--n_readers` | 8000 | How many simulated readers to train on | Network sees too few examples; poor recovery, real overfitting risk | Slower generation; diminishing returns |
+| `--n_epochs` | 80 | Complete passes over the training set | Under-trained: loss still falling, weak recovery | Wasted time; mild memorisation risk |
+| `--batch_size` | 64 | Examples per weight update | Noisy, unstable training | Fewer updates per epoch; may need more epochs |
+| `summary_dim` | 64 | Size of the LSTM's compressed summary | Not enough room to encode the sequence | More parameters, slower, more memorisation risk |
+| `num_layers` | 6 | Coupling-flow layers | Cannot represent complex posterior shapes | Slower, harder to train |
+| `M_SENTENCES` | 14 | Sentences per simulated reader | **Critical** — too few and `nu`/`r` become unidentifiable | Longer sequences, more truncation |
+| `SEQ_LEN` | 150 | Max fixations kept per reader | Truncation (see 13.6) | More memory, mostly padding |
+
+**The most important of these is `M_SENTENCES = 14`**, and it is worth
+understanding why. A single sentence yields only ~8 fixations — far too little
+to tell "this reader has a wide span" from "this sentence happened to contain
+easy words." Watching the *same* reader across 14 sentences is what makes `nu`
+and `r` identifiable at all. Reducing it to 1 would not make the network worse
+at its job; it would make the job impossible. (The stale
+`outputs/figures/baseline_M10/` folder is left over from an earlier
+`M_SENTENCES = 10` configuration of the older model.)
+
+**`bidirectional=False`** is also a deliberate choice. An LSTM can be set to
+read the sequence both forward and backward; the project tested this and found
+it roughly doubled training time with no accuracy gain, so it reads forward
+only — in natural reading order, which is also the more principled choice for
+a temporal process.
+
+---
+
+# PART 15 — Comparison With the Original Paper
+
+## 15.1 Side by side
+
+| Aspect | Engbert & Rabe (2024) | This project |
+|---|---|---|
+| Model | Simplified SWIFT, basic 3-parameter | Same — `nu`, `r`, `mu_T` |
+| Inference method | Bayesian (the paper's own tutorial pipeline) | BayesFlow amortized neural SBI |
+| `nu` recovery | Reported as the **hardest** parameter, with a right-skewed posterior | **Strong** (r = 0.941) |
+| `r` recovery | Recovers reasonably | Strong (r = 0.959) |
+| `mu_T` recovery | Recovers well (it is the duration mean) | Near-perfect (r = 0.997) |
+| Decoupling (timing ⊥ scanpath) | Predicted by the model structure (Section 4.1) | **Confirmed on real data** (corr ≈ 0.007 / 0.061) |
+| Train/test split | First-half sentences fit, second-half checked (Section 6) | Same |
+| Regressions | Emergent, no suppression mechanism | Same structure — and we quantify the resulting error |
+
+## 15.2 Where we do better than the paper: `nu`
+
+This is the project's clearest methodological contribution and worth
+highlighting in any write-up. The paper reports `nu` as its most difficult
+parameter, with a skewed, poorly-constrained posterior. We recover it strongly
+(r = 0.941, contraction 0.866).
+
+**The reason is not that our network is better.** It is the **7 hand-crafted
+summary statistics fed directly to the inference network as conditions**,
+bypassing the LSTM. An LSTM reading a raw sequence of `[word_id, duration]`
+pairs must *discover* for itself that "the proportion of word positions never
+visited" is a meaningful quantity. That is a subtle, global, counting-based
+property of a sequence, and LSTMs are not naturally good at it. Computing the
+skip rate directly with three lines of NumPy and handing it over removes the
+problem entirely — and Part 12.3 showed the skip rate is precisely what `nu`
+depends on most.
+
+The general lesson, which is a genuinely valuable finding to report: **when you
+know which summary statistics are scientifically meaningful, providing them
+directly can beat asking a network to learn them from raw data.**
+
+## 15.3 Where we match the paper
+
+Duration measures (SFD, GD, TT all within ~6 ms), skip and refixation rates
+(within ~2 percentage points), and the decoupling prediction. On everything the
+basic model is designed to capture, the fit is good.
+
+## 15.4 Where we differ, and why
+
+All four differences are documented in `RESULTS.md §6`, and all are honest
+limitations rather than bugs:
+
+1. **Regressions over-produced** (10% vs 2%) — see Part 16 for the full
+   analysis. The paper's basic model has the same structure and the same
+   weakness.
+2. **Duration spread over-predicted.** Because `alpha` is fixed at 9, simulated
+   durations *always* have a coefficient of variation of exactly 1/3 = 0.333.
+   VP10's real durations are tighter (0.246). This is **structural**: no
+   setting of any free parameter can change it, because `alpha` is not free. To
+   fix it you would have to free `alpha`, which the basic model does not do.
+3. **The "seconds" interpretation** in the activation update — the one place
+   the implementation had to reconcile the paper's millisecond wording with its
+   `r` values. Documented rather than silently assumed.
+4. **`beta` fixed at 0.6** and `iota` not implemented — both belong to the
+   paper's larger 5-parameter extended model.
+
+## 15.5 "Could this be improved with more simulated data, or is it a summary-network problem?"
+
+This is the right diagnostic question to ask when results disappoint, and this
+project can answer it **with evidence** rather than guesswork. The answer
+differs by symptom, and the reasoning below is the transferable part:
+
+**If recovery were weak but coverage were correct** → an *information* problem.
+More simulated data would not help. You would need better summary statistics or
+a better summary network.
+
+**If recovery were weak and coverage were also wrong (say 70%)** → a *training*
+problem. More data and more epochs would genuinely help.
+
+**If recovery is strong but the PPC still misses** → a **model** problem. The
+inference is working correctly; the simulator itself cannot produce the
+behaviour. Neither more data nor a better network can fix this.
+
+**Our situation is unambiguously the third case.** Recovery is 0.94–1.00,
+coverage is 95–96%, contraction is 0.87–0.99 — the inference machinery is
+working essentially as well as it can. Yet the PPC misses regressions by a
+factor of five. Therefore:
+
+| Proposed fix | Would it help the regression gap? | Why |
+|---|---|---|
+| Generate 50,000 readers instead of 8,000 | **No** | Recovery is already ~0.95; more data cannot fix a simulator that does not produce the behaviour |
+| A bigger/bidirectional LSTM | **No** | Same reason — this is not an information-extraction failure |
+| More training epochs | **No** | The model has converged |
+| More hand-crafted statistics | **No** | Regression rate is already provided directly |
+| **Change the model** (add regression suppression) | **Yes** | This is the actual cause |
+| Raise `SEQ_LEN` to 250 | Marginally, for other things | Fixes the truncation issue in 13.6, unrelated to regressions |
+
+Part 16 proves this claim rather than merely asserting it.
+
+---
+
+# PART 16 — The Regression Problem: A Worked Analysis
+
+This is the project's most interesting scientific finding and the part most
+worth understanding in depth, because it demonstrates the difference between
+"our method failed" and "we learned something about the model."
+
+## 16.1 The finding
+
+From the posterior predictive check on held-out sentences:
+
+| Measure | Real VP10 | Simulated from our estimate |
+|---|---:|---:|
+| Mean SFD | 202.52 ms | 204.38 ms ✓ |
+| Mean GD | 213.64 ms | 212.34 ms ✓ |
+| Mean TT | 214.38 ms | 220.19 ms ✓ |
+| P(skip) | 20.55% | 18.06% ✓ |
+| P(refixation) | 9.09% | 7.71% ✓ |
+| **P(regression)** | **1.82%** | **10.11%** ✗ |
+
+Five of six measures match well. Regressions are wrong by roughly a factor of
+five — the model has VP10 jumping backward far more often than they really do.
+
+## 16.2 Why it happens, mechanically
+
+In this model, regressions are **emergent** — there is no "regression dial." A
+backward jump happens when a word to the *left* of the current one has drifted
+into the half-processed state where the sine-saliency rule makes it maximally
+attractive. Since the processing span always includes the word to the left
+(weight `lambda_-1 = sigma·nu`), earlier words are continuously being topped up
+and continuously becoming candidates to jump back to.
+
+Critically, **there is nothing in the model that suppresses this.** Real
+readers have strong forward momentum: reading is a directed process, and going
+backward is the exception, triggered by comprehension difficulty. The basic
+model has no such directional preference — its target rule is purely "whichever
+word is most half-processed," with no bias toward moving forward. So it
+regresses whenever the arithmetic happens to favour a leftward word.
+
+## 16.3 Proof that this is *not* an inference failure
+
+This is the important part, and the project can demonstrate it directly rather
+than argue it. Two pieces of evidence:
+
+**Evidence 1 — VP10's regression rate sits in the extreme tail of what the
+model can produce.** Comparing VP10's real statistics against the distribution
+of the 8,000 simulated training readers (a **prior predictive check** — does
+the model, across its entire prior range, produce behaviour like this person's
+at all?):
+
+| Statistic | VP10's value | Percentile within the simulated readers |
+|---|---:|---:|
+| Mean duration | 0.197 | 32% ✓ comfortably central |
+| Std. dev. of duration | 0.049 | 16% ✓ |
+| Fixations per sentence | 0.762 | 28% ✓ |
+| Skip rate | 0.187 | 47% ✓ |
+| Refixation rate | 0.114 | 57% ✓ |
+| Saccade amplitude | 0.220 | 5% ⚠ low tail |
+| **Regression rate** | **0.015** | **2%** ⚠⚠ **extreme low tail** |
+
+Only **161 of 8,000** simulated readers (2%) regress as little as VP10 does.
+The model *can* produce such a reader, but only barely, and only at unusual
+parameter settings. On the other five statistics, VP10 is a perfectly ordinary
+member of the simulated population.
+
+**Evidence 2 — the model cannot match regressions and refixations at the same
+time.** This is the decisive test. Take the simulated readers that closely match
+VP10 on skip rate and refixation rate, and ask what regression rate they
+produce. Then take the readers that match VP10's low regression rate, and ask
+what *their* other statistics look like:
+
+| Group | Skip rate | Refixation rate | Regression rate |
+|---|---:|---:|---:|
+| **VP10 (real)** | **0.187** | **0.114** | **0.015** |
+| Simulated readers matching VP10 on skip + refixation (n = 191) | 0.187 ✓ | 0.114 ✓ | **0.130** ✗ (9× too high) |
+| Simulated readers matching VP10's low regressions (n = 422) | 0.252 ✗ | **0.013** ✗ (9× too low) | 0.018 ✓ |
+
+**Read that table carefully — it is the core result.** There is *no* parameter
+setting that gets all three right:
+
+- Match the refixation and skip rates, and regressions come out 9× too high.
+- Force regressions down to VP10's level, and refixations collapse to 9× too
+  low.
+
+The parameters that produce low regressions are `nu ≈ 0.31`, `r ≈ 9.03` — a
+narrow span and a fast rate — but a fast rate means words finish in one look,
+which destroys the refixations VP10 actually shows.
+
+**This is model misspecification, proven.** The simulator's structure cannot
+reproduce the combination of behaviours a real human exhibits. No amount of
+extra training data, network capacity, or training time can fix it, because the
+failure is in the forward model, before inference is ever involved.
+
+> Reproduce both tables with `python tools/analyse_information.py` (sections
+> `[3/4]` and `[4/4]`). It needs no trained model, so this evidence stands
+> independently of whichever `.keras` file happens to be on disk.
+
+## 16.4 The `r` trade-off, stated precisely
+
+This is the specific question of "does improving one parameter make another
+worse," and here is the concrete answer:
+
+The fitted posterior sits at `nu = 0.40`, `r = 6.33` — a **compromise**,
+sitting between the two incompatible regimes:
+
+```
+        LOW regressions                    HIGH refixations
+        (matches VP10's 1.8%)              (matches VP10's 11.4%)
+        nu ≈ 0.31, r ≈ 9.03                nu ≈ 0.52, r ≈ 5.56
+              |                                    |
+              |          FITTED: nu=0.40, r=6.33   |
+              |------------------●-----------------|
+                     the posterior lands between them
+```
+
+**Raising `r`** (faster processing) → words finish in one visit → fewer
+refixations *and* fewer regressions. Good for regressions, bad for refixations.
+
+**Lowering `r`** → more revisiting → more refixations *and* more regressions.
+Good for refixations, bad for regressions.
+
+Because `r` pushes both measures in the *same* direction, while VP10 needs them
+to move in *opposite* directions (few regressions **but** many refixations),
+`r` alone cannot satisfy both. The posterior settles between them, and the
+fixed −0.317 correlation between `nu` and `r` is the visible fingerprint of the
+network negotiating this trade-off.
+
+This is precisely why the estimate is *not* wrong: given a model that cannot
+express VP10's true behaviour, landing on the best available compromise is
+correct behaviour for a Bayesian estimator.
+
+## 16.5 What would actually fix it
+
+1. **A forward-bias / regression-suppression term** in the target rule — the
+   natural extension, deliberately *not* implemented here because it would
+   double-count against the paper's emergent mechanism, and the assignment
+   specified the simplified model.
+2. **Inhibition of return** — a well-known effect in eye-movement research
+   where recently visited locations become temporarily less attractive. This
+   would directly damp regressions and is the mechanism most cognitive models
+   use.
+3. **The full SWIFT model**, which has additional machinery for exactly this.
+
+## 16.6 How to describe this finding
+
+The framing matters. The weak version is "our model didn't fit the regressions."
+The strong, accurate version is:
+
+> Our inference pipeline is verified accurate and well-calibrated (recovery
+> 0.94–1.00, coverage 95–96%). Applying it to real data revealed that the
+> *simplified SWIFT model itself* cannot simultaneously reproduce a human
+> reader's low regression rate and high refixation rate — we demonstrated this
+> directly by showing that simulated readers matching VP10 on skip and
+> refixation rates over-regress ninefold, while those matching the regression
+> rate under-refixate ninefold. This identifies a specific structural
+> limitation of the basic model and points to regression suppression as the
+> needed extension.
+
+That is a finding, not a failure. Being able to say *why* a model fails, with
+evidence, is a better outcome than a fit that works for reasons nobody checked.
+
+---
+
+# PART 17 — Every Plot, Precisely: What Is Compared to What
+
+A plot can only be read correctly if you know **what is being compared to
+what**. The same parameter can look good in one plot and bad in another because
+the comparisons are different. This part makes the comparison explicit for every
+figure.
+
+## 17.1 The three kinds of comparison in this project
+
+| Comparison type | What is on each side | What it can tell you | What it *cannot* tell you |
+|---|---|---|---|
+| **Simulated vs. known truth** | Network's estimate vs. the true parameters used to generate the data | Whether the *inference method* works | Nothing about whether the model describes real humans |
+| **Real vs. simulated-from-estimate** | VP10's actual behaviour vs. behaviour simulated from the fitted parameters | Whether the *model* describes real reading | Nothing about whether inference is accurate |
+| **Real data alone** | VP10's data, no model involved | Context and benchmark values | Nothing about the model at all |
+
+**This distinction resolves the most common confusion in the whole project.**
+`nu` looks excellent in `recovery_plot.png` and the regression bar looks bad in
+`ppc_plot.png` — and both are true simultaneously, with no contradiction,
+because they are answering different questions. Recovery says "if a reader
+truly had this `nu`, we would correctly detect it." The PPC says "the model
+with any `nu` cannot reproduce VP10's regressions." Good inference of a
+model that is itself imperfect.
+
+## 17.2 Every figure
+
+| Plot | Comparison type | What is on the axes | Good looks like | Ours |
+|---|---|---|---|---|
+| `span_shape.png` | **No comparison** — simulator check | `nu` (x) vs the four span weights (y) | Matches the paper's Fig. 2 | ✓ verified by unit test |
+| `scanpath_examples.png` | **No comparison** — simulator check | Fixation number (x) vs word position (y) | Mostly rising with occasional skips/refixations/regressions | ✓ plausible |
+| `eda_fixations.png` | **Real data alone** | Three histograms: duration, signed saccade amplitude, fixations per sentence | No pass/fail — establishes benchmarks | 197 ms, 7.69 fix/sentence |
+| `training_loss.png` | **Training only** | Epoch (x) vs training loss (y) | Falls then flattens | ✓ converged (training loss only — no validation curve) |
+| `recovery_plot.png` | **Simulated vs. known truth** | True value (x) vs posterior mean (y), 300 fresh sims | Points hug the diagonal | ✓ 0.941 / 0.959 / 0.997 |
+| `sbc_histogram.png` | **Simulated vs. known truth** | Rank of the true value among posterior draws | Flat/uniform bars | ✓ flat |
+| `sbc_ecdf.png` | **Simulated vs. known truth** | Cumulative rank curve vs a confidence band | Curve stays inside the band | ✓ inside |
+| `contraction_plot.png` | **Simulated vs. known truth** | How much the posterior narrowed vs the prior | High values | ✓ 0.87 / 0.90 / 0.99 |
+| `posterior_VP10.png` | **Real data → estimate** (no truth exists) | Parameter value (x) vs density (y); orange posterior on grey prior | Narrow, clearly peaked, not jammed against an edge | ✓ all three well inside their priors |
+| `posterior_correlation.png` | **Within the estimate** | 3×3 heatmap of parameter correlations | `mu_T` row/column ≈ 0 | ✓ 0.007 / 0.061 |
+| `ppc_plot.png` | **Real vs. simulated-from-estimate** | Blue = real VP10, orange = simulated | Overlapping histograms, matching bars | ✓ durations; ✗ regression bar |
+
+## 17.3 How to read the four trickiest plots
+
+**`recovery_plot.png`** — 300 points per panel, one per fresh simulated reader.
+Horizontal = the true parameter we chose; vertical = what the network guessed.
+A perfect network puts every point on the diagonal. Points *above* the line
+mean over-estimation, *below* mean under-estimation. Look for two failure
+shapes: a **flat cloud** (the network ignores the data and always guesses the
+prior mean) and a **line with the wrong slope** (systematic bias — e.g.
+shrinking every estimate toward the middle). Ours shows neither; `mu_T` is
+almost a perfect line, `nu` and `r` are tight clouds around it.
+
+**`sbc_histogram.png`** — the least intuitive plot, so here is the idea. For
+each validation reader, ask: among the network's 1,000 posterior draws, where
+does the *true* value rank? If the posterior is honest, the true value should
+be equally likely to land anywhere in that ranking — so across 300 readers, the
+histogram of ranks should be **flat**. The two diagnostic failure shapes:
+
+- **U-shaped** (too many ranks at the extremes) = the posterior is **too
+  narrow** → the network is **overconfident**. This is the classic overfitting
+  signature.
+- **Hump in the middle** = the posterior is **too wide** → the network is
+  **underconfident** (harmless but wasteful).
+- **Sloped** = systematic bias in one direction.
+
+Ours is flat, matching the measured coverage of 95–96%.
+
+**`posterior_VP10.png`** — grey band = the full prior range (everything we
+considered possible beforehand); orange histogram = what we now believe after
+seeing VP10's data. **The comparison is between the grey and the orange.** If
+the orange filled the grey, the data taught us nothing. Ours occupies a narrow
+slice — e.g. `mu_T` sits in 182–216 ms out of a possible 100–400 ms. Also check
+that the orange is not pressed against either edge of the grey, which would
+suggest the true value lies outside the prior; ours are all comfortably
+interior.
+
+**`ppc_plot.png`** — the only plot involving real and simulated data together.
+Blue = VP10's real behaviour on the **held-out test sentences**; orange =
+behaviour simulated from the fitted parameters. The three duration panels
+should overlap heavily (they do). The fourth panel's three bar pairs should be
+similar in height; ours match on skip and refixation and diverge sharply on
+regression — the visual form of Part 16. Note that the orange histograms are
+somewhat wider than the blue ones, which is the CV = 1/3 over-dispersion
+described in Part 15.4 (item 2) showing up visually.
+
+---
+
+# PART 18 — Question-and-Answer Bank
+
+Likely questions, with answers. If you can answer these, you understand the
+project.
+
+## About the project overall
+
+**Q: What is this project in one sentence?**
+It estimates, from a real person's eye-tracking recording, the three parameters
+of a cognitive model of reading — using a neural network trained entirely on
+simulated data, because the model has no likelihood formula.
+
+**Q: Why not use standard Bayesian methods like MCMC?**
+Those require a likelihood function — a formula for "how probable is this data
+given these parameters." The SWIFT model is a stochastic simulator with no such
+formula. Simulation-based inference exists precisely for this case: it replaces
+the missing formula with a network trained on simulated examples.
+
+**Q: What does "amortized" mean and why does it matter?**
+The expensive training cost is paid once and spread over all future uses. After
+training, a posterior for any new observation takes milliseconds. It also means
+we could analyse a second participant instantly, with no retraining.
+
+**Q: Why 14 sentences per reader?**
+One sentence gives only ~8 fixations — too few to distinguish "this reader has a
+wide span" from "this sentence had easy words." Concatenating 14 sentences from
+the same simulated reader is what makes `nu` and `r` identifiable at all.
+
+## About the parameters
+
+**Q: Are the parameters influenced by the data you trained on?**
+Three separate answers. The prior *ranges* come from the paper, not our data.
+The network's *weights* were learned from simulated data only — never VP10's.
+The final *estimate* for VP10 is driven by VP10's real fixations, which is
+exactly what it should be. (Part 11.1.)
+
+**Q: How are the parameters related to each other?**
+`mu_T` is independent of the other two (measured correlation 0.007 and 0.061) —
+it reads off durations while the others read off word positions, so they use
+different data columns entirely. `nu` and `r` trade off moderately (−0.317)
+because both control how quickly words get processed, so a similar amount of
+total processing can be produced by different combinations.
+
+**Q: Which parameter is most important?**
+Depends on the question. `mu_T` is the most precisely estimated (contraction
+0.990) but also the least interesting — it is essentially the mean fixation
+duration. `nu` is the scientifically interesting one: the paper reports it as
+hardest to estimate, and our hand-crafted statistics are what let us recover it
+strongly. `r` matters most for the misfit story in Part 16.
+
+**Q: Which is hardest to estimate, and why?**
+`nu`, with the lowest recovery (0.941) and contraction (0.866). It is inferred
+indirectly through skipping and jump lengths, and it partially trades off with
+`r`. `mu_T` is easiest because it is the duration mean by construction.
+
+**Q: Which column of the data determines which parameter?**
+`mu_T` ← `fixation_duration` (column 4). `nu` and `r` ← `word_id` (column 2),
+ordered by `fixation_index` (column 9). `nu` through skipping and jump length;
+`r` through refixation and fixation counts. Everything else is unused. (Part
+11.5.)
+
+## About validity and overfitting
+
+**Q: Does your model overfit?**
+No, and we check it in a way that is stronger than a validation curve. The 300
+validation readers are freshly simulated at diagnostic time, so they cannot have
+been memorised. Recovery stays at 0.94–1.00 on them, and — the decisive
+evidence — the 95% intervals achieve 95.0/96.0/95.3% coverage. Overfitted
+networks are characteristically overconfident, which would show as coverage well
+below 95% and a U-shaped SBC histogram. We see neither.
+
+**Q: But your loss plot has no validation curve — how can you claim that?**
+Correct, and worth stating openly: `fit_offline` is called without
+`validation_data`, so `training_loss.png` shows training loss only. In
+simulation-based inference the recovery/SBC/coverage diagnostics on fresh
+simulations are the stronger overfitting test, because they measure posterior
+accuracy and calibration directly rather than a proxy loss. Adding
+`validation_data` is a sensible small improvement.
+
+**Q: How do you validate at all, given the true parameters for a real human are
+unknown?**
+Two stages. On *simulated* data we know the truth, so we measure recovery,
+calibration and contraction. On *real* data no truth exists, so we instead check
+whether the fitted model reproduces VP10's behaviour — on a held-out half of
+sentences never used for fitting.
+
+**Q: Did you use the real data anywhere except the final step?**
+No. The prior came from the paper; the fixed constants are the paper's published
+values; the normalisation constants are fixed numbers, not data statistics.
+VP10's recording enters only at the estimation step, and the PPC uses a
+held-out half of it.
+
+**Q: How do you know the data even contains information about these
+parameters?**
+Four independent checks (Part 12): statistic↔parameter correlations up to 0.99;
+a nearest-neighbour predictor recovering R² = 0.84–0.98 with no network at all;
+permutation importance showing each parameter depends on the mechanistically
+correct statistics; and posterior contraction of 87–99%.
+
+**Q: What is the permutation test and what did it show?**
+Shuffle one summary statistic across readers so it carries no real information,
+and measure how much predictive accuracy is lost. It showed `nu` depends
+overwhelmingly on the skip rate, `r` on the refixation rate, and `mu_T` on the
+two duration statistics only — scrambling the scanpath statistics costs `mu_T`
+0.003, i.e. nothing, which independently confirms the decoupling.
+
+## About the results
+
+**Q: What did you find for VP10?**
+`nu` = 0.40 [0.28, 0.54], `r` = 6.33 [5.27, 7.87], `mu_T` = 198 ms [182, 216].
+A moderate processing span, a moderate-to-fast processing rate, and an average
+fixation of about 198 ms.
+
+**Q: `mu_T` = 198 ms and VP10's mean duration is 196.9 ms. Isn't that
+circular?**
+It is expected, not circular. In this model `E[fixation duration] = mu_T` by
+construction, so a correct estimator *must* land there. It is a useful sanity
+check — had it come out at 250 ms, something would be broken.
+
+**Q: What went wrong, and is it your fault?**
+Regressions: 10% simulated vs 1.8% real. It is not an inference failure. We
+demonstrated that simulated readers matching VP10 on skip and refixation rates
+regress ninefold too much, while those matching the regression rate refixate
+ninefold too little — so *no* parameter setting fits both. That is a structural
+limitation of the simplified model. (Part 16.)
+
+**Q: Would more simulated data or a better network fix it?**
+No to both. Those would help if recovery were weak or calibration were off, but
+recovery is 0.94–1.00 and coverage is 95–96% — inference is working. The failure
+is in the forward model, which more data cannot change. The fix is a regression
+suppression / inhibition-of-return mechanism in the model itself.
+
+**Q: Why is the simulated duration spread too wide?**
+The Gamma shape constant `alpha` is fixed at 9, forcing a coefficient of
+variation of exactly 1/3 = 0.333. VP10's real value is 0.246. No free parameter
+can change this — it would require freeing `alpha`, which the basic model does
+not do.
+
+**Q: What is the single most important design decision in the project?**
+Feeding 7 hand-crafted summary statistics directly to the inference network
+alongside the LSTM. It is what lifts `nu` from the paper's hardest parameter to
+strong recovery. Part 12.2 shows those statistics alone account for most of the
+achievable accuracy.
+
+**Q: If you had more time, what would you do?**
+In priority order: (1) add regression suppression to the simulator and test
+whether the PPC gap closes; (2) raise `SEQ_LEN` from 150 to 250 to remove the
+29% training truncation; (3) add `validation_data` to `fit_offline` for a proper
+validation curve; (4) free `alpha` to fix the duration spread; (5) fit multiple
+participants and compare — the amortized network makes this nearly free.
+
+---
+
+# PART 19 — Glossary
 
 An alphabetical collection of every technical term used in this document, in
 one place.
@@ -2218,23 +3603,47 @@ one place.
   numbers is, relative to its own average value (a distribution with a low
   coefficient of variation is tightly clustered close to its average; a high
   one is much more spread out).
+- **Convergence** — the point during training when the network stops
+  meaningfully improving and the loss flattens out. Judged here not by the loss
+  alone but by whether recovery, calibration and contraction are good on fresh
+  simulated data (Part 14).
 - **Corpus** — in linguistics/reading research, a structured collection of
   text (here, 114 German sentences) along with information about each word
   in it (length, frequency).
 - **Coupling flow** — the specific type of normalizing flow (see below) used
   as this project's "inference network."
+- **Coverage (of a credible interval)** — how often the true value actually
+  falls inside the interval the network claims. If a network's stated 95%
+  intervals contain the truth 95% of the time, its confidence is honest.
+  Measured here as 95.0 / 96.0 / 95.3% — the strongest single piece of evidence
+  against overfitting (Part 13.4).
 - **Credible interval** — the Bayesian-statistics equivalent of a
   confidence interval: a range of values that the posterior distribution
   says has a stated probability (e.g. 95%) of containing the true value.
 - **DataFrame** — pandas' name for a table of data with named columns and
   numbered rows, similar to a spreadsheet.
+- **Decoupling** — in this project, the finding that the timing side of the
+  model (`mu_T`) and the scanpath side (`nu`, `r`) are independent: they read
+  off different data columns and their estimates are uncorrelated (≈ 0.007 and
+  0.061). Predicted by the paper's model structure and confirmed here on real
+  data.
+- **Emergent behaviour** — behaviour the model produces without any explicit
+  rule for it. Here, skipping, refixation and regression all emerge from the
+  single sine-saliency target rule; the model contains no "skip dial" or
+  "regression dial."
 - **Epoch** — one complete pass of a neural network through the entire
   training dataset.
-- **Eccentricity (in this project)** — how far away (in characters) a word
-  is from wherever the simulated eye is currently pointed.
+- **Eccentricity** — how far away (in characters) a word is from wherever the
+  eye is currently pointed. *(Belonged to the older full-SWIFT implementation;
+  the current basic model has no spatial extent and does not use it.)*
 - **Exponential distribution** — a standard mathematical distribution
   commonly used to model "how long until the next random event happens,"
   where short waits are common and long waits get progressively rarer.
+  *(Used by the older Gillespie-based implementation; the current model draws
+  durations from a Gamma distribution instead.)*
+- **Gamma distribution** — a standard family of bell-ish, right-skewed
+  distributions for positive quantities. Fixation durations here are Gamma
+  draws with mean `mu_T` and shape `alpha = 9`.
 - **Fixation** — a short pause of the eye on a word while reading; the basic
   unit of data in this whole project.
 - **Foveal / fovea** — the small central part of the eye's retina
@@ -2244,6 +3653,9 @@ one place.
   chemistry) for simulating systems where several random events could each
   happen next, by repeatedly drawing "how long until the next event" and
   "which event happens" from the combined rates of every possibility.
+  *(Used by the older full-SWIFT implementation. The current basic model does
+  **not** use it — it steps forward one fixation at a time instead. The term
+  is kept here because it appears in the paper and in this project's history.)*
 - **Identifiability** — whether a parameter can, even in principle, be
   reliably pinned down by the kind of data available, as opposed to whether
   the code correctly implements the estimation method. A parameter can
@@ -2268,9 +3680,19 @@ one place.
 - **Loss** — a single number produced during neural network training that
   measures how wrong the network's current guesses are; training works by
   repeatedly nudging the network to make this number smaller.
+- **Model misspecification** — when the model itself is structurally incapable
+  of producing the behaviour seen in the real data, regardless of parameter
+  values. Distinct from an inference failure (where the model *could* fit but
+  the estimation method fails). This project's regression gap is
+  misspecification, proven in Part 16.3.
 - **Multiprocessing** — running several separate copies of a program at the
   same time, typically on different CPU cores of the same computer, to
   finish independent pieces of work faster.
+- **Overfitting** — when a model learns the specific training examples,
+  including their noise, instead of the general pattern; it then performs well
+  on training data and badly on anything new. Largely prevented here because
+  training data is simulated on demand and validation uses freshly generated
+  examples (Part 13).
 - **Neural network** — a machine-learning model, loosely inspired by
   networks of connected brain neurons, that learns to recognize patterns and
   make predictions from many training examples rather than from an
@@ -2296,12 +3718,24 @@ one place.
   confident) a posterior distribution is compared to the original prior
   range; near 1 means highly informative data, near 0 means the data barely
   changed anything.
+- **Permutation importance** — a way of measuring how much a particular input
+  matters, by scrambling that input across examples (so it keeps its
+  distribution but loses its meaning) and measuring how much accuracy is lost.
+  Used in Part 12.3 to show which summary statistic drives which parameter.
 - **Posterior Predictive Check (PPC)** — simulating new data using estimated
   parameter values and checking whether that simulated data resembles the
   real data the parameters were estimated from, as a final end-to-end
   sanity check.
 - **Prior** — the range/distribution of parameter values considered
   plausible before any data has been taken into account.
+- **Prior predictive check** — the mirror image of a posterior predictive
+  check, done *before* fitting: simulate across the whole prior range and ask
+  whether the real data looks like anything the model can produce at all. Part
+  16.3 uses this to show VP10's regression rate sits at the 2nd percentile of
+  what the model can generate.
+- **R² (coefficient of determination)** — a measure of how much of the
+  variation in a quantity is explained by a prediction. 1.0 = perfectly
+  predicted, 0.0 = no better than guessing the average.
 - **PyTorch** — the underlying numerical computation engine (a
   "machine-learning backend") that actually performs the neural network math
   in this project.
@@ -2326,8 +3760,19 @@ one place.
 - **Standard deviation** — a standard statistical measure of how spread out
   a set of numbers is, expressed in the same units as the original numbers
   (e.g., "the average duration was 197 ms, plus or minus 48 ms").
+- **Spearman correlation** — a measure of whether two quantities move together,
+  based on their rank order rather than their raw values. Robust to curved
+  (non-straight-line) relationships, which is why it is used in Part 12.1.
 - **Stochastic** — involving randomness/chance, as opposed to being fully
   predetermined.
+- **Train/test split** — dividing data so that a model is fitted on one portion
+  and evaluated on another it has never seen. Here, VP10's first 57 sentences
+  are used to estimate parameters and the remaining 57 only for the posterior
+  predictive check (`split_half`).
+- **Truncation (of a sequence)** — cutting a sequence off at a maximum length.
+  Here, sequences longer than `SEQ_LEN = 150` fixations lose their tail; this
+  affects 29% of simulated training readers but no real VP10 observations
+  (Part 13.6).
 - **Summary network** — the part of the neural network (here, an LSTM) that
   compresses a variable-length raw fixation sequence down into one
   fixed-size vector of numbers.
@@ -2340,7 +3785,7 @@ one place.
 
 ---
 
-# PART 12 — Troubleshooting / FAQ
+# PART 20 — Troubleshooting / FAQ
 
 **"ModuleNotFoundError: No module named 'bayesflow'" (or 'swift')** — make
 sure you're using the correct Python environment where the project's
@@ -2359,14 +3804,48 @@ spline component needs). If you see this error anyway, make sure
 its fix) before any other BayesFlow/PyTorch code runs, and that the
 `KERAS_BACKEND=torch` environment variable is genuinely set.
 
+**`ValueError: cannot find context for 'fork'` when running `--mode generate`
+(Windows)** — this is a real, confirmed limitation, not a misconfiguration.
+`swift/generate.py` creates its parallel worker processes with
+`mp.get_context("fork")`, and **`fork` does not exist on Windows** (it is a
+Unix-only way of creating processes). The saved `data/training_data.npz` in
+this repository was generated on a Unix-like machine. Your options, in order of
+effort:
+
+1. **Use the existing `data/training_data.npz`** if it is present — generation
+   only needs to happen once, and `--mode train` reads the saved file. This is
+   why the recommended workflow separates the two steps.
+2. **Change `"fork"` to `"spawn"`** in `swift/generate.py`. `spawn` works on
+   Windows, but it re-imports the module in each worker, so the call must be
+   protected by an `if __name__ == "__main__":` guard — `main.py` already has
+   one, so this generally works.
+3. **Run generation on macOS/Linux** (including WSL) and copy the resulting
+   `.npz` file across. The file is plain NumPy data and is fully portable.
+
 **"No training data at data/training_data.npz"** — run
 `python main.py --mode generate` first (or `--mode all`, which does
-generation and training together automatically).
+generation and training together automatically). On Windows, see the `fork`
+note directly above first.
 
 **"No saved model at outputs/models/swift_approximator.keras"** — run
 `python main.py --mode train` (or `--mode all`) first;
 `tools/show_results.py` and `--mode infer` both require an already-trained
 model to exist on disk.
+
+> **⚠️ Note on the current state of this repository (checked 2026-07-18):**
+> `outputs/models/swift_approximator.keras` is **not present**. The
+> `outputs/models/` folder currently contains only older models
+> (`swift_approximator_M14_old.keras`, plus `old-4param-no-iota/` and
+> `old-custom-4param/` subfolders from the superseded 4-parameter model).
+> This means **`tools/show_results.py` and `--mode infer` will fail right now**
+> with the error above until a model is retrained. The `.keras` model file is
+> deliberately gitignored, so this is expected after a fresh clone — but be
+> aware that the numbers quoted throughout Part 10 come from
+> `outputs/results_summary.json` (generated 2026-07-18 00:11, when a trained
+> model did exist), not from a model currently on disk. Retrain with
+> `python main.py --mode train` to reproduce them. Do **not** rename an `old-`
+> model into place to make the scripts run: those were trained on a different
+> parameter set and would silently produce meaningless results.
 
 **The numbers move slightly every time I run `tools/show_results.py`** —
 this is expected, not a bug. VP10 inference pools posteriors across
@@ -2385,7 +3864,7 @@ shared history, since those go directly into the written report.
 
 ---
 
-# PART 13 — References
+# PART 21 — References
 
 - Engbert, R., & Rabe, M. B. (2024). *A tutorial on Bayesian inference for
   dynamical modeling of eye-movement control during reading.* Journal of
