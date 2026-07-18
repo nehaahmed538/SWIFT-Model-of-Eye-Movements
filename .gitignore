@@ -11,7 +11,6 @@ env/
 
 # Large, regenerable artifacts (figures are kept for the report/presentation)
 data/training_data.npz
-outputs/models/
 
 # OS / editor
 .DS_Store
