@@ -35,6 +35,16 @@ background can follow along.*
 > directly from `data/training_data.npz` and are reproducible; the commands
 > used are given inline where relevant.
 
+> **👥 2026-07-19 all-participants extension.** The pipeline was extended from
+> one participant (VP10) to **all 34 participants** of the original experiment,
+> using the *same* trained network with **no retraining** (the script is
+> `tools/all_participants_ppc.py`; the data lives in `data/vp_all/`). A new
+> **Part 19** explains that analysis and walks through its five new figures
+> plot-by-plot, including every underlying concept; Parts 3, 4, 6, 9, 10.6 and
+> 17 were updated to mention the new command, data folder, output files and
+> plots. The former Parts 19–21 (Glossary, Troubleshooting, References) are
+> now Parts 20–22.
+
 ---
 
 ## How to read this document
@@ -49,15 +59,16 @@ means in this project.** For example:
 > brain can read it.
 
 You will see this pattern throughout the document. There is also a full
-**Glossary** near the end (Part 19) that collects every technical term in one
+**Glossary** near the end (Part 20) that collects every technical term in one
 place, in case you want to look something up without hunting through the whole
 document.
 
-The document is organized into 21 parts. Parts 1–10 explain *what the project
-is and what it does*; Parts 11–18 are the deeper analysis — how the parameters
+The document is organized into 22 parts. Parts 1–10 explain *what the project
+is and what it does*; Parts 11–19 are the deeper analysis — how the parameters
 relate to each other, whether the data actually contains information about
-them, whether the model overfits, how it compares to the original paper, and a
-question-and-answer bank you can revise from:
+them, whether the model overfits, how it compares to the original paper, a
+question-and-answer bank you can revise from, and the extension of the whole
+pipeline from one participant to all 34 participants of the experiment:
 
 1. What is this project? (the goal, explained simply)
 2. The big picture (how all the pieces fit together)
@@ -82,9 +93,12 @@ question-and-answer bank you can revise from:
     gets wrong, and proof of *why*
 17. **Every plot, precisely** — what exactly is being compared to what
 18. **Question-and-answer bank** — likely questions, with answers
-19. Glossary
-20. Troubleshooting / FAQ
-21. References
+19. **The all-participants extension** — the same trained network applied to
+    every one of the 34 readers in the experiment, with a plot-by-plot guide
+    to the five new cross-participant figures
+20. Glossary
+21. Troubleshooting / FAQ
+22. References
 
 ---
 
@@ -350,7 +364,7 @@ once — the results are saved to disk and reused by later steps.
 > different count, the numbers in Parts 10, 12 and 16 will shift slightly.
 
 > **⚠️ Windows users:** this command will fail with
-> `ValueError: cannot find context for 'fork'`. See Part 20 (Troubleshooting)
+> `ValueError: cannot find context for 'fork'`. See Part 21 (Troubleshooting)
 > for why and what to do — the short version is that the saved
 > `data/training_data.npz` already exists, so you can skip straight to Step 2.
 
@@ -439,6 +453,23 @@ simulator has to run fresh every single time instead of being pre-computed
 once. It exists mainly as a fallback/comparison option, not as part of the
 normal workflow.
 
+**Optional — apply the trained network to ALL 34 participants (Part 19).**
+
+```bash
+python tools/all_participants_ppc.py
+```
+
+This is the "all-participants extension" analysed in depth in Part 19. It
+retrains **nothing**: it loads the already-saved network and repeats the
+"estimate the parameters, then reality-check them" procedure once per
+participant file in `data/vp_all/` (34 people, VP10 included), then draws the
+five cross-participant figures and writes two machine-readable result files
+(`outputs/all_participants_results.json` and
+`outputs/cross_participant_correlations.json`). Because the reality-check
+simulations are repeated 34 times, expect a total runtime in the tens of
+minutes on a laptop CPU — the script deliberately uses smaller per-person
+sample sizes than the VP10-only tools to keep this feasible (see Part 19.3).
+
 ## 3.4 Summary table of every command
 
 | Command | What it does | Rough time |
@@ -452,6 +483,7 @@ normal workflow.
 | `python tools/show_results.py --quick` | Same as above but tiny sample sizes, for a fast smoke test | ~5 seconds |
 | `python tools/calibrate.py` | Fast, model-free check of the simulator's average behavior vs. real VP10 data | A few seconds |
 | `python tools/analyse_information.py` | Model-free analysis: which statistic carries information about which parameter, and the regression/refixation trade-off (reproduces Parts 12 and 16) | A few seconds |
+| `python tools/all_participants_ppc.py` | Apply the trained network to all 34 participants (no retraining); writes the five cross-participant figures and two JSON result files (Part 19) | Tens of minutes |
 
 Every command in this table must be run from the project's root folder (the
 folder containing `main.py`), because the code inside these scripts figures
@@ -461,10 +493,14 @@ out where the `data/` and `outputs/` folders are relative to that root.
 
 # PART 4 — The Datasets: Every File and Every Column, Explained
 
-This project uses exactly two input data files, both stored in the `data/`
-folder. **Only one of them is "real data" in the sense that matters for the
-scientific question** — the other is background information the simulator
-needs, not something the project runs its statistical inference on.
+This project's main pipeline uses exactly two input data files, both stored
+in the `data/` folder. **Only one of them is "real data" in the sense that
+matters for the scientific question** — the other is background information
+the simulator needs, not something the project runs its statistical inference
+on. (Two more entries live alongside them: a file the project *generates*,
+described in 4.3, and — since the all-participants extension — a `data/vp_all/`
+folder holding the same kind of recording for all 34 participants of the
+experiment, described in 4.4.)
 
 ## 4.1 File 1 — `fixseqin_PB2expVP10.dat` — the real eye-tracking recording
 
@@ -610,6 +646,34 @@ repository) because it is large, easy to regenerate, and specific to
 whichever machine generated it. If you clone this project fresh, you will not
 find this file, and you need to run the `--mode generate` command (Part 3,
 Step 1) to create it yourself.
+
+## 4.4 The `data/vp_all/` folder — the same experiment, all 34 participants
+
+Added on 2026-07-19 for the all-participants extension (Part 19). The original
+experiment that produced VP10's recording had not one but **34** participants,
+and this folder contains all of their fixation files —
+`fixseqin_PB2expVP1.dat` through `fixseqin_PB2expVP34.dat` — downloaded from
+the same public OSF repository that the Engbert & Rabe (2024) paper itself
+links to (`osf.io/8wrf6`, folder
+`R-Code-parameter-estimation-from-experimental-data/expdata/`; the source
+experiment is Risse & Seelig, 2019). Each file has **exactly the same
+10-column, no-header format** described in 4.1 — same 114 sentences, same
+columns, just a different person — and the folder also carries
+`Rcorpus_PB2.dat`, a copy of the word-properties corpus. The
+`fixseqin_PB2expVP10.dat` inside this folder is the same recording as the
+project's original VP10 file; VP10 is simply participant number 10 of the 34.
+
+The files vary quite a bit in size: the shortest (VP15) has 616 fixations and
+the longest (VP1) has 1,317; all 34 together contain 30,639 fixations. That
+variation is itself meaningful — different people make different numbers of
+fixations while reading the *same* 114 sentences, which is exactly the kind of
+between-person difference the model's parameters are supposed to capture.
+
+Like the original VP10 file, none of these files is ever touched while
+building the simulator, generating training data, or training the network —
+they are read by exactly one script, `tools/all_participants_ppc.py`, at
+inference time only (the "use the trained tool" stage, never the "build the
+tool" stage).
 
 ---
 
@@ -792,7 +856,9 @@ SWIFT-Model-of-Eye-Movements/
 ├── data/                      <- data files
 │   ├── fixseqin_PB2expVP10.dat   real recording (Part 4.1)
 │   ├── Rcorpus_PB2_revision.dat  word-properties reference file (Part 4.2)
-│   └── training_data.npz         generated by generate.py (Part 4.3)
+│   ├── training_data.npz         generated by generate.py (Part 4.3)
+│   └── vp_all/                   all 34 participants' recordings, same
+│                                  format as VP10's file (Part 4.4)
 │
 ├── outputs/                   <- everything the program produces
 │   ├── figures/                  every diagnostic image (kept in the
@@ -804,16 +870,22 @@ SWIFT-Model-of-Eye-Movements/
 │   │   └── swift_approximator.keras   the trained neural network (NOT kept
 │   │                                    in version control — regenerate it
 │   │                                    locally by training)
-│   └── results_summary.json      machine-readable snapshot written by
-│                                  tools/show_results.py
+│   ├── results_summary.json      machine-readable snapshot written by
+│   │                              tools/show_results.py
+│   ├── all_participants_results.json        per-participant estimates and
+│   │                              reality-check numbers (Part 19.9)
+│   └── cross_participant_correlations.json  the six real-vs-simulated
+│                                  correlations from Part 19.5
 │
 ├── tools/                     <- small standalone helper scripts
 │   ├── calibrate.py               fast, model-free simulator sanity check
 │   ├── show_results.py            read-only report of the saved model
-│   └── analyse_information.py     model-free analysis of which statistic
-│                                   informs which parameter, plus the
-│                                   regression/refixation trade-off
-│                                   (reproduces Parts 12 and 16)
+│   ├── analyse_information.py     model-free analysis of which statistic
+│   │                               informs which parameter, plus the
+│   │                               regression/refixation trade-off
+│   │                               (reproduces Parts 12 and 16)
+│   └── all_participants_ppc.py    apply the trained network to ALL 34
+│                                   participants — no retraining (Part 19)
 │
 ├── docs/                      <- written documentation
 │   ├── PROJECT_GUIDE.md           the project's own from-scratch walkthrough
@@ -2307,6 +2379,19 @@ is what each one shows and what a "good" result looks like.
 | `posterior_correlation.png` | A heatmap of how the three estimated parameters correlate with each other for VP10. | The `mu_T`-vs-`nu` and `mu_T`-vs-`r` cells should be ≈ 0 — confirming duration is decoupled from the scanpath, as the basic model predicts. |
 | `ppc_plot.png` | Real VP10 data (blue) versus data freshly simulated from the estimate (orange): three duration histograms (SFD/GD/TT) plus a bar chart of skip/refixation/regression probabilities. | Substantial overlap on the durations; the regression bar is the known miss (Part 10.4). The final "does the fitted model behave like the real person" check. |
 
+Five further figures are produced not by `main.py` but by the
+all-participants extension (`python tools/all_participants_ppc.py`). They are
+listed here for completeness; **Part 19 explains each of them plot-by-plot,
+including every concept needed to read them**:
+
+| Plot file | What is shown | What a good result looks like |
+|---|---|---|
+| `all_participants_ppc.png` | One dot per participant (34 dots): the real value of each of six reading measures on that person's held-out sentences (horizontal) vs. the value simulated from their fitted parameters (vertical), with a correlation `r` per panel. | Dots hugging the dashed diagonal, high `r`. Ours: durations and skipping excellent (r = 0.98 / 0.96 / 0.95 / 0.92), refixation moderate (0.74), regression weakest (0.66) with dots sitting *above* the line — the per-person version of the known over-regression (Parts 16, 19.5). |
+| `all_participants_ppc_pooled.png` | The same 4-panel layout as `ppc_plot.png`, but pooling all 34 participants' real (blue) vs. simulated (orange) measures together. | Overlapping histograms and matched bar pairs. Ours: durations overlap well; skip ≈16% real vs ≈14% simulated, refixation ≈16% vs ≈11%, regression ≈6% vs ≈11% (Part 19.6). |
+| `all_participants_posteriors.png` | One panel per parameter; each gray curve is one participant's posterior density, the blue curve is the average across all 34. | Narrow gray curves (informative data), peaks spread across different locations (real individual differences), none pressed against the plot edges (prior wide enough). Ours passes all three (Part 19.7). |
+| `all_participants_posterior_correlation.png` | A 3×3 correlation heatmap over all 680,000 pooled posterior samples (34 people × 20,000 samples). | Values near 0. Non-zero entries here mostly reflect *between-person* differences leaking into the pooled bag, **not** within-person coupling — the key subtlety explained in Part 19.8. |
+| `all_participants_theta_correlation.png` | A 3×3 correlation heatmap of the 34 per-person point estimates — how the parameters co-vary *across people*. | There is no pass/fail target — this one is a *finding*, not a check: e.g. `r` vs `mu_T` = −0.53 suggests a general "reading speed" dimension across people (Part 19.8). |
+
 The `outputs/figures/baseline_M10/` subfolder contains stale plots from the
 superseded 4-parameter full-SWIFT model (at `M_SENTENCES = 10`) — kept only as
 historical reference, and **not** comparable to the current 3-parameter run.
@@ -2441,6 +2526,9 @@ parts analyse *why* those results came out the way they did:
 - **How we compare against the original paper, and whether more data or a
   better network would help:**
   [Part 15](#part-15--comparison-with-the-original-paper).
+- **How the same trained network fares on the other 33 participants** — and
+  the five cross-participant figures, explained plot-by-plot:
+  [Part 19](#part-19--the-all-participants-extension-one-trained-network-34-real-readers).
 
 ---
 
@@ -3377,6 +3465,11 @@ model that is itself imperfect.
 | `posterior_VP10.png` | **Real data → estimate** (no truth exists) | Parameter value (x) vs density (y); orange posterior on grey prior | Narrow, clearly peaked, not jammed against an edge | ✓ all three well inside their priors |
 | `posterior_correlation.png` | **Within the estimate** | 3×3 heatmap of parameter correlations | `mu_T` row/column ≈ 0 | ✓ 0.007 / 0.061 |
 | `ppc_plot.png` | **Real vs. simulated-from-estimate** | Blue = real VP10, orange = simulated | Overlapping histograms, matching bars | ✓ durations; ✗ regression bar |
+| `all_participants_ppc.png` | **Real vs. simulated-from-estimate**, once per person | Per-person real measure (x) vs simulated measure (y); 34 dots per panel | Dots hug the diagonal | ✓ durations/skip (r ≥ 0.92); ✗ regression dots sit above the line (r = 0.66) |
+| `all_participants_ppc_pooled.png` | **Real vs. simulated-from-estimate**, pooled over people | Blue = all 34 people's real measures, orange = all simulated | Overlapping histograms, matching bars | ✓ durations; refixation under, regression over (Part 19.6) |
+| `all_participants_posteriors.png` | **Real data → estimate** (no truth exists), 34 times | Parameter value (x) vs posterior density (y); one gray curve per person, blue = mean | Narrow, spread-out, interior curves | ✓ all three parameters (Part 19.7) |
+| `all_participants_posterior_correlation.png` | **Within the estimates**, pooled over people | 3×3 heatmap over 680,000 pooled samples | Near 0 — but see the between-person caveat | `r`–`mu_T` −0.45: between-person leakage, not within-person coupling (Part 19.8) |
+| `all_participants_theta_correlation.png` | **Between people** (individual differences — a finding, not a check) | 3×3 heatmap of the 34 point estimates | n/a | `r`–`mu_T` −0.53, `nu`–`r` +0.42: a "reading speed" axis (Part 19.8) |
 
 ## 17.3 How to read the four trickiest plots
 
@@ -3577,7 +3670,372 @@ participants and compare — the amortized network makes this nearly free.
 
 ---
 
-# PART 19 — Glossary
+# PART 19 — The All-Participants Extension: One Trained Network, 34 Real Readers
+
+*(Added 2026-07-19. Everything in this part is produced by one command —
+`python tools/all_participants_ppc.py` — which reuses the already-trained
+network from `outputs/models/swift_approximator.keras`. Nothing is retrained.)*
+
+## 19.1 What this extension is, and why it exists
+
+Everything up to this point estimated the parameters of exactly **one**
+person, VP10 — that was the course brief. But VP10 was never alone: the
+original experiment that produced their recording had **34 participants**
+(labelled VP1 through VP34), and the Engbert & Rabe (2024) paper itself fits
+its model to *every* participant, summarizing the results in its Figures 8
+and 9. This extension does the same thing with this project's pipeline: it
+takes the trained network and asks it, one person at a time, "what are *this*
+reader's `nu`, `r`, and `mu_T`?" — and then reality-checks each answer against
+that person's own held-out data.
+
+Two things make this extension worth doing, beyond completeness:
+
+1. **It is the clearest possible demonstration of amortized inference**
+   (Part 1.4's "train once, reuse forever" idea). The expensive work —
+   simulating 8,000 artificial readers and training the network — was paid
+   *once*. Estimating a 34th person costs the same few seconds as estimating
+   the first. A classical method (like the MCMC sampling used in the paper)
+   would have to restart its whole expensive computation from scratch for
+   every single person.
+2. **It is a genuine test of generalization.** The network was trained purely
+   on simulated data and only ever *evaluated* against VP10. If anything in
+   the pipeline had quietly become tuned to VP10's quirks, applying it to 33
+   people it has never been near would expose that. (Spoiler: it generalizes
+   well — see 19.5.)
+
+## 19.2 The per-participant procedure, step by step
+
+For each of the 34 files in `data/vp_all/` (described in Part 4.4), the
+script repeats the same logic used for VP10 in Parts 10.3–10.4:
+
+1. **Split the person's sentences in half.** The model is fit on the first
+   half and tested on the held-out second half — the same train/test split
+   idea as Part 10.4 ("held-out" literally means "kept out": data set aside
+   and never shown to the fitting step, so the later check is honest).
+2. **Estimate.** Build 20 random "reader draws" of 14 sentences each from the
+   fitting half, hand each to the trained network, and draw 1,000 posterior
+   samples per draw — 20,000 posterior samples per person. The **posterior
+   mean** (the average of those samples) is used as the person's single
+   point estimate for each parameter.
+3. **Reality-check (posterior predictive check).** Draw 150 parameter
+   settings from the person's posterior, run the SWIFT simulator with each on
+   the *held-out* sentences, and compute six standard reading measures on
+   both the real held-out data and the simulated data.
+
+The six reading measures (computed by `_sentence_measures` in
+`swift/diagnostics.py`, same as for VP10):
+
+- **SFD — single-fixation duration:** how long the eye stayed on words that
+  were fixated exactly once in the whole sentence.
+- **GD — gaze duration:** the total duration of the eye's *first visit* to a
+  word (including immediate refixations, but not later returns).
+- **TT — total fixation time:** all fixation time a word ever received,
+  including re-reading later.
+- **P(skip), P(refixation), P(regression):** the three rate measures already
+  used throughout this document.
+
+One honest note on precision: the per-person sample sizes (20 reader draws ×
+1,000 samples, 150 reality-check draws) are deliberately **half** of what the
+VP10-only tools use (40 × 2,000, 300), because the whole procedure now runs 34
+times. Individual participants' numbers are therefore slightly noisier than
+the VP10 numbers in Part 10; what this extension is really after is the
+*cross-participant* picture, which averages that noise out.
+
+## 19.3 The headline numbers
+
+The 34 estimated parameter values span a wide, plausible range:
+
+| Parameter | Smallest estimate | Largest estimate | Average across the 34 |
+|---|---|---|---|
+| `nu` (processing span) | 0.12 (VP1) | 0.70 (VP7) | 0.35 |
+| `r` (processing rate) | 2.9 (VP26) | 7.6 (VP32) | 4.7 |
+| `mu_T` (mean fixation duration) | 199 ms (**VP10**) | 344 ms (VP5) | 239 ms |
+
+Two details here are worth pausing on:
+
+- **VP10 is the fastest fixator of all 34 people.** The one participant this
+  project studied in depth has the *lowest* `mu_T` in the entire group —
+  VP10 sits at the edge of the population, not in its middle. (VP10's
+  regression rate, at ~2%, is similarly near the low extreme — which matters
+  in 19.6.)
+- **The estimates line up with the raw data exactly as Part 11 predicts.**
+  The person with the lowest skip rate in the raw data (VP1, 4.6%) received
+  the lowest `nu` — and skipping is `nu`'s main signal. The person with the
+  highest refixation rate (VP26, 31%) received the lowest `r` — and
+  refixation is `r`'s main signal. The network is visibly reading the right
+  columns for the right dials, person by person.
+
+And the headline result — how well each person's *simulated* reading matches
+their *real* reading, across people (the correlations from
+`outputs/cross_participant_correlations.json`, shown in the first figure
+below):
+
+| Reading measure | Cross-participant correlation (real vs. simulated) |
+|---|---:|
+| Single-fixation duration (SFD) | **0.98** |
+| Gaze duration (GD) | **0.96** |
+| Total fixation time (TT) | **0.95** |
+| P(skip) | **0.92** |
+| P(refixation) | 0.74 |
+| P(regression) | 0.66 |
+
+The quality ranking — durations ≈ perfect, skipping strong, refixation
+moderate, regression weakest — is *exactly* the ranking that the information
+analysis (Part 12) and the trade-off analysis (Part 16) predicted from VP10
+alone. Seeing it hold across 34 independent people is strong confirmation
+that those were genuine properties of the model, not quirks of one person.
+
+## 19.4 Concepts you need for the figures (read this once, then the plots are easy)
+
+The five figures below use four ideas that have not all been needed before:
+
+- **Scatter plot with an identity line.** Each dot is one participant. Its
+  horizontal position is the *real* value of some measure; its vertical
+  position is the *simulated* value. The dashed diagonal is the **identity
+  line** — the line where simulated = real. A dot exactly on the line means
+  the fitted model reproduced that person's number perfectly; above the line
+  means the model over-produces it, below means under-produces.
+- **Correlation coefficient (`r`).** A single number between −1 and +1
+  measuring how well one set of numbers *tracks* another: +1 means "when one
+  goes up, the other goes up in perfect lockstep," 0 means "no relationship,"
+  −1 means perfect opposite movement. Crucially, **correlation measures
+  tracking, not agreement**: all 34 dots can sit well *above* the identity
+  line (a systematic offset — the model over-produces the measure for
+  everyone) while `r` is still high, because the *ordering* of people is
+  preserved. Keep this distinction in mind for the regression panel.
+- **Density curve / kernel density estimate (KDE).** A smooth version of a
+  histogram. Instead of counting samples into bars, a KDE replaces each
+  sample with a tiny smooth bump and adds the bumps up, giving a smooth curve
+  whose height means "values around here are this likely." It shows the same
+  information as a histogram, just easier to overlay 34 of them in one panel.
+- **Pooled vs. per-person.** "Pooling" (literally: putting into one shared
+  pool) means throwing all 34 people's numbers into one big bag and treating
+  the bag as a single dataset. Pooling is useful for population-level
+  questions but hides who contributed what — and, as 19.8 shows, it can
+  manufacture correlations that exist for *no individual person*.
+
+## 19.5 Figure 1 — `all_participants_ppc.png`: the headline figure
+
+**What it is:** six scatter panels, one per reading measure. In each panel
+there are 34 dots — one per participant. Horizontal axis: the person's *real*
+value of the measure, computed on their held-out sentences. Vertical axis:
+the value *simulated* from their fitted parameters on those same held-out
+sentences. Dashed diagonal = identity line; the `r` in each title is the
+correlation across the 34 dots. This is the project's equivalent of the
+paper's Figure 9, produced with amortized BayesFlow inference instead of the
+paper's MCMC.
+
+**What each panel shows, in order:**
+
+1. **Single-fixation duration, r = 0.98.** The dots hug the identity line
+   from ~195 ms up to the one outlier at ~377 ms (VP5, the slowest reader —
+   whose simulated value, ~356 ms, still tracks them almost perfectly). This
+   panel says: for essentially every person, the fitted model reproduces
+   *that person's* typical fixation duration. The flattering part is not the
+   simulation (durations are `mu_T`'s job by construction, Part 5.1) — it is
+   the *inference*: the network correctly found each individual's `mu_T`
+   from their data alone.
+2. **Gaze duration, r = 0.96** (and **3. Total fixation time, r = 0.95** —
+   the same story). Still excellent, but look closely at the high end: the
+   dots for the slowest readers drift *below* the line. GD and TT, unlike
+   SFD, include refixations and re-reading — and the model under-produces
+   refixations (panel 5), so it slightly under-produces the long gaze
+   durations and total times of the readers who re-read the most.
+4. **P(skip), r = 0.92.** Strong tracking across a wide real range
+   (4.6%–28.5%). Most dots sit slightly *below* the line: the model skips a
+   little less than real people at every level, but faithfully preserves
+   *who* skips more than whom.
+5. **P(refixation), r = 0.74.** Moderate. The real range is huge (7%–31%),
+   and the dots sit mostly below the line — systematic under-prediction,
+   the mirror image of the regression problem (this is the refixation side
+   of Part 16.4's trade-off).
+6. **P(regression), r = 0.66 — the most interesting panel.** Nearly every
+   dot is *above* the identity line. The simulated regression rates form a
+   **floor**: no matter whether a person's real rate is 0.7% (VP25) or 17.5%
+   (VP30), the simulation produces roughly 7–13%. This is Part 16's finding
+   made visible person-by-person: the model's processing span *always*
+   generates roughly 10% backward jumps as a side-effect and has no
+   mechanism to go lower. Only the few genuinely high-regression readers
+   (real rate ≥ 11%) land near the line — for them, reality happens to meet
+   the model's floor. Note how the two halves of the correlation lesson from
+   19.4 both apply here: `r` = 0.66 says ordering is partly preserved, while
+   the position of the cloud above the line says the *level* is
+   systematically wrong for most people.
+
+**The one-sentence takeaway:** fitted per person, the model reproduces
+*individual differences* in reading speed and skipping almost perfectly,
+refixation moderately, and regressions only for people who regress a lot.
+
+## 19.6 Figure 2 — `all_participants_ppc_pooled.png`: the population-level reality check
+
+**What it is:** the same four-panel layout as VP10's `ppc_plot.png` (three
+duration histograms plus a skip/refix/regression bar chart; blue = real,
+orange = simulated), but with all 34 participants' held-out measures **pooled**
+into one bag. The histograms are drawn as *densities* (bars scaled so their
+total area is 1) so that the real and simulated groups can be compared fairly
+even though they contain different numbers of values.
+
+**What it shows:**
+
+- **The three duration panels (SFD, GD, TT) overlap heavily.** The simulated
+  (orange) distributions are slightly *wider* than the real (blue) ones —
+  the same CV = 1/3 over-dispersion already diagnosed for VP10 in Part 15.4,
+  now visible at population scale.
+- **The bar panel:** skipping ≈16% real vs ≈14% simulated (small
+  under-shoot); refixation ≈16% real vs ≈11% simulated (clear under-shoot);
+  regression ≈6% real vs ≈11% simulated (clear over-shoot).
+
+**The genuinely new nuance this figure adds:** for VP10, the regression
+mismatch looked like a factor of **5** (2% real vs 10% simulated,
+Part 10.4). At the population level it is a factor of **2** (≈6% vs ≈11%) —
+because VP10's regression rate turns out to be unusually *low* for the group
+(19.3). The model still over-regresses, but the single participant this
+project happened to study made the problem look worse than it typically is.
+Conversely, the refixation under-prediction — barely visible for VP10
+(9.1% vs 7.7%) — is much clearer at population scale (≈16% vs ≈11%). Both
+shifts are the two ends of Part 16.4's see-saw: the model trades refixations
+against regressions and cannot match both at once.
+
+## 19.7 Figure 3 — `all_participants_posteriors.png`: 34 posteriors on one canvas
+
+**What it is:** three panels, one per parameter (`nu`, `r`, `mu_T`). The
+horizontal axis of each panel spans exactly that parameter's **prior range**
+(Part 5.2): 0–1 for `nu`, 0–12 for `r`, 100–400 ms for `mu_T`. Each **gray
+curve** is one participant's posterior, drawn as a smooth density curve (the
+KDE from 19.4). The **blue curve** is the average of the 34 gray curves.
+This is the project's equivalent of the paper's Figure 8 (which shows the
+same thing for its 5 parameters; ours has 3).
+
+**The three things to check, and what ours shows:**
+
+1. **Are the gray curves narrow relative to the axis?** Yes — every curve
+   occupies a small slice of its prior range. Meaning: the data is
+   informative about *every* person, not just VP10. (If a curve spanned the
+   whole axis, the data would have taught the network nothing about that
+   person — compare `posterior_VP10.png`'s gray-vs-orange logic in
+   Part 17.3.)
+2. **Do the peaks sit at *different* places for different people?** Yes —
+   e.g. the `mu_T` peaks range from ~200 ms to ~340 ms. This is what real
+   **individual differences** look like. It is also an important sanity
+   check on the network itself: if all 34 curves peaked at the same spot,
+   the network would likely be ignoring its input and returning one default
+   answer for everyone.
+3. **Is any curve pressed against the edge of the axis?** No — every
+   posterior sits comfortably inside its prior range, so the priors were
+   wide enough for the whole population, not just for VP10.
+
+One readable detail: the clearly separated rightmost gray curve in the
+`mu_T` panel, peaking near 340 ms, is VP5 — the slowest fixator (19.3). The
+network identified this unusual reader confidently rather than dragging them
+toward the group average.
+
+## 19.8 Figures 4 and 5 — the two correlation heatmaps, and how not to confuse them
+
+Both figures are 3×3 **correlation heatmaps**, the same format as VP10's
+`posterior_correlation.png` (Part 9): each cell holds the correlation between
+two parameters, colored red for positive and blue for negative; the diagonal
+is always exactly 1 (everything correlates perfectly with itself), and the
+matrix is symmetric. But the two figures answer **completely different
+questions**, and telling them apart requires the trickiest concept in this
+whole part.
+
+**Figure 4 — `all_participants_posterior_correlation.png` ("pooled").** Take
+*all* posterior samples of *all* people — 34 people × 20,000 samples =
+680,000 rows — pool them into one table, and correlate the columns. Result:
+`nu`–`r` = +0.28, `nu`–`mu_T` = −0.25, `r`–`mu_T` = **−0.45**.
+
+**Figure 5 — `all_participants_theta_correlation.png` ("point estimates").**
+Reduce each person to their three posterior-mean point estimates — a table
+with only 34 rows, one per human — and correlate those. Result: `nu`–`r` =
++0.42, `nu`–`mu_T` = −0.29, `r`–`mu_T` = **−0.53**.
+
+**The apparent contradiction.** Part 10.3 established — as a headline
+finding! — that for VP10, `mu_T` is *uncorrelated* with `nu` and `r`
+(≈ 0.007 / 0.061): the duration dial is decoupled from the scanpath dials,
+exactly as the model's design predicts. So why does the pooled matrix now
+show `r`–`mu_T` = −0.45? Did the decoupling break?
+
+**Resolution: within-person vs. between-person correlation.** These are two
+different quantities that merely share the word "correlation":
+
+- **Within one person** (what Part 10.3 measured): across the posterior
+  samples *of a single individual*, does believing in a higher `r` go along
+  with believing in a lower `mu_T`? Answer: no, ≈ 0. The decoupling holds,
+  for VP10 and within each of the 34 posteriors individually.
+- **Between people** (what Figure 5 measures): do *people who have* high `r`
+  tend to *be people who have* low `mu_T`? Answer: yes, −0.53. That is a
+  fact about the population of humans, not about the model's wiring.
+
+When you pool everything into one bag (Figure 4), each person's 20,000
+samples form a small cloud around that person's own (`nu`, `r`, `mu_T`)
+location — and those 34 clouds are *arranged* along the between-person
+pattern. The pooled correlation therefore mostly re-measures Figure 5's
+between-person arrangement (slightly diluted by the within-person clouds,
+which is why every pooled value is a weaker version of its Figure 5
+counterpart: −0.45 vs −0.53, +0.28 vs +0.42, −0.25 vs −0.29). Nothing about
+the within-person decoupling changed.
+
+An everyday analogy: within any one school class, shoe size and reading
+ability are uncorrelated. Pool every class from age 6 to 18 into one dataset
+and shoe size suddenly "predicts" reading ability strongly — not because feet
+help you read, but because *both* grow with age *between* the groups you
+pooled. Mixing groups manufactures a correlation that exists for no
+individual group. (Statisticians file this under **ecological correlation**,
+a close relative of Simpson's paradox.)
+
+**So what is each heatmap actually for?**
+
+- Figure 4 is the **decoupling check at scale**: had it shown something like
+  `mu_T`–`nu` = −0.9, that could not be explained by individual differences
+  and would flag a real problem in the model or network. Its actual mild
+  values, fully accounted for by Figure 5, are a pass.
+- Figure 5 is a **scientific finding about people** (the first result in
+  this project that needed more than one participant to exist): faster
+  processors (higher `r`) tend to have wider processing spans (`nu`, +0.42)
+  and shorter fixations (`mu_T`, −0.53). In plain terms, a general "reading
+  speed" dimension — people who are fast are fast in every sense at once.
+
+**Honest caveats on Figure 5, before anyone over-quotes it:** n = 34 people
+is small — a correlation of ±0.4 at n = 34 carries roughly ±0.3 of
+uncertainty, so treat the exact values loosely. And a slice of the `nu`–`r`
+value may come from estimation noise rather than real people-differences,
+since those two parameters are also mildly correlated *within* each posterior
+(+0.28 pooled). The sign pattern is a suggestive, plausible finding — not a
+confirmed law.
+
+## 19.9 The two machine-readable output files
+
+- **`outputs/all_participants_results.json`** — a list of 34 records, one
+  per participant: their id, number of fixations and sentences, the three
+  posterior-mean estimates, and all six real-vs-simulated measure pairs.
+  This is the raw data behind Figures 1 and 5, ready for any further
+  analysis without re-running anything.
+- **`outputs/cross_participant_correlations.json`** — just the six
+  correlation values printed in Figure 1's panel titles (19.3's second
+  table).
+
+## 19.10 What this extension adds to the project's conclusions
+
+1. **The network generalizes.** Trained purely on simulations, evaluated
+   during development only against VP10, it produced sensible, informative,
+   internally consistent estimates for 33 people it had never touched — the
+   strongest evidence yet against any VP10-specific overfitting
+   (complementing Part 13).
+2. **The model's quality ranking is confirmed at population level.**
+   Durations ≈ perfect, skipping strong, refixation moderate, regression
+   weakest — exactly the ordering Parts 12 and 16 predicted from one person.
+3. **VP10 in context.** VP10 is the fastest fixator of the 34 and among the
+   least regression-prone; the infamous 5× regression gap of Part 10.4 is a
+   2× gap for the population. The model still over-regresses — but less
+   dramatically than the VP10-only view suggested.
+4. **A genuinely new finding:** the parameters correlate *across people*
+   (a "reading speed" dimension) while remaining decoupled *within* each
+   person — a distinction (19.8) that only becomes visible, or even
+   definable, once you estimate more than one reader.
+
+---
+
+# PART 20 — Glossary
 
 An alphabetical collection of every technical term used in this document, in
 one place.
@@ -3785,7 +4243,7 @@ one place.
 
 ---
 
-# PART 20 — Troubleshooting / FAQ
+# PART 21 — Troubleshooting / FAQ
 
 **"ModuleNotFoundError: No module named 'bayesflow'" (or 'swift')** — make
 sure you're using the correct Python environment where the project's
@@ -3864,11 +4322,18 @@ shared history, since those go directly into the written report.
 
 ---
 
-# PART 21 — References
+# PART 22 — References
 
 - Engbert, R., & Rabe, M. B. (2024). *A tutorial on Bayesian inference for
   dynamical modeling of eye-movement control during reading.* Journal of
   Mathematical Psychology, 119, 102843.
+- Risse, S., & Seelig, S. (2019) — the boundary-paradigm reading experiment
+  ("PB2") that produced the 34-participant eye-tracking dataset used in the
+  all-participants extension (Part 19). Data obtained from the paper's own
+  OSF repository: https://osf.io/8wrf6/, folder
+  `R-Code-parameter-estimation-from-experimental-data/expdata/`. (Cited here
+  as in `tools/all_participants_ppc.py`; the exact article title was not
+  re-verified from within this project.)
 - Rabe, M. B., Chandra, J., Krügel, A., Seelig, S. A., Vasishth, S., &
   Engbert, R. (2021). *A Bayesian approach to dynamical modeling of
   eye-movement control in reading of normal, mirrored, and scrambled texts.*
